@@ -10,7 +10,6 @@ import io.fabric8.kubernetes.client.KubernetesClient;
 import io.micrometer.prometheus.PrometheusMeterRegistry;
 import io.strimzi.api.kafka.Crds;
 import io.strimzi.api.kafka.KafkaTopicList;
-import io.strimzi.api.kafka.model.DoneableKafkaTopic;
 import io.strimzi.api.kafka.model.KafkaTopic;
 import io.strimzi.api.kafka.model.KafkaTopicBuilder;
 import io.strimzi.operator.common.model.Labels;
@@ -91,7 +90,7 @@ public class TopicOperatorMockTest {
     public void createMockKube(VertxTestContext context) throws Exception {
         MockKube mockKube = new MockKube();
         mockKube.withCustomResourceDefinition(Crds.kafkaTopic(),
-                        KafkaTopic.class, KafkaTopicList.class, DoneableKafkaTopic.class);
+                        KafkaTopic.class, KafkaTopicList.class, KafkaTopic::getStatus, KafkaTopic::setStatus);
         kubeClient = mockKube.build();
 
         kafkaCluster = new KafkaCluster();
@@ -110,6 +109,7 @@ public class TopicOperatorMockTest {
         m.put(io.strimzi.operator.topic.Config.ZOOKEEPER_CONNECT.key, "localhost:" + zkPort(kafkaCluster));
         m.put(io.strimzi.operator.topic.Config.ZOOKEEPER_CONNECTION_TIMEOUT_MS.key, "30000");
         m.put(io.strimzi.operator.topic.Config.NAMESPACE.key, "myproject");
+        m.put(io.strimzi.operator.topic.Config.CLIENT_ID.key, "myproject-client-id");
         m.put(io.strimzi.operator.topic.Config.FULL_RECONCILIATION_INTERVAL_MS.key, "10000");
         session = new Session(kubeClient, new io.strimzi.operator.topic.Config(m));
 
@@ -205,14 +205,15 @@ public class TopicOperatorMockTest {
         int retention = 100_000_000;
         KafkaTopic kt = new KafkaTopicBuilder()
                 .withNewMetadata()
-                .withName("my-topic")
-                .addToLabels(Labels.STRIMZI_KIND_LABEL, "topic")
-                .addToLabels(Labels.KUBERNETES_NAME_LABEL, "topic-operator")
+                    .withName("my-topic")
+                    .withNamespace("myproject")
+                    .addToLabels(Labels.STRIMZI_KIND_LABEL, "topic")
+                    .addToLabels(Labels.KUBERNETES_NAME_LABEL, "topic-operator")
                 .endMetadata()
                 .withNewSpec()
-                .withPartitions(1)
-                .withReplicas(1)
-                .addToConfig("retention.bytes", retention)
+                    .withPartitions(1)
+                    .withReplicas(1)
+                    .addToConfig("retention.bytes", retention)
                 .endSpec().build();
 
         testCreatedInKube(context, kt);
@@ -320,14 +321,15 @@ public class TopicOperatorMockTest {
         int retention = 100_000_000;
         KafkaTopic kt = new KafkaTopicBuilder()
                 .withNewMetadata()
-                .withName("my-topic")
-                .addToLabels(Labels.STRIMZI_KIND_LABEL, "topic")
+                    .withName("my-topic")
+                    .withNamespace("myproject")
+                    .addToLabels(Labels.STRIMZI_KIND_LABEL, "topic")
                 .endMetadata()
                 .withNewSpec()
-                .withTopicName("my-topic") // the same as metadata.name
-                .withPartitions(1)
-                .withReplicas(1)
-                .addToConfig("retention.bytes", retention)
+                    .withTopicName("my-topic") // the same as metadata.name
+                    .withPartitions(1)
+                    .withReplicas(1)
+                    .addToConfig("retention.bytes", retention)
                 .endSpec().build();
 
         testCreatedInKube(context, kt);
@@ -338,8 +340,9 @@ public class TopicOperatorMockTest {
         int retention = 100_000_000;
         KafkaTopic kt = new KafkaTopicBuilder()
                 .withNewMetadata()
-                .withName("my-topic")
-                .addToLabels(Labels.STRIMZI_KIND_LABEL, "topic")
+                    .withName("my-topic")
+                    .withNamespace("myproject")
+                    .addToLabels(Labels.STRIMZI_KIND_LABEL, "topic")
                 .endMetadata()
                 .withNewSpec()
                     .withTopicName("DIFFERENT") // different to metadata.name

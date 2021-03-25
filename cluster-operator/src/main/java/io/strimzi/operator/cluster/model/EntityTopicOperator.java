@@ -12,7 +12,6 @@ import io.fabric8.kubernetes.api.model.SecurityContext;
 import io.fabric8.kubernetes.api.model.Volume;
 import io.fabric8.kubernetes.api.model.VolumeMount;
 import io.fabric8.kubernetes.api.model.rbac.RoleBinding;
-import io.fabric8.kubernetes.api.model.rbac.RoleBindingBuilder;
 import io.fabric8.kubernetes.api.model.rbac.RoleRef;
 import io.fabric8.kubernetes.api.model.rbac.RoleRefBuilder;
 import io.fabric8.kubernetes.api.model.rbac.Subject;
@@ -27,6 +26,7 @@ import io.strimzi.operator.cluster.ClusterOperatorConfig;
 import io.strimzi.operator.common.model.OrderedProperties;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 import static java.util.Arrays.asList;
@@ -59,6 +59,10 @@ public class EntityTopicOperator extends AbstractModel {
             .withInitialDelaySeconds(EntityTopicOperatorSpec.DEFAULT_HEALTHCHECK_DELAY)
             .withTimeoutSeconds(EntityTopicOperatorSpec.DEFAULT_HEALTHCHECK_TIMEOUT).build();
 
+    // Volume name of the temporary volume used by the TO container
+    // Because the container shares the pod with other containers, it needs to have unique name
+    /*test*/ static final String TOPIC_OPERATOR_TMP_DIRECTORY_DEFAULT_VOLUME_NAME = "strimzi-to-tmp";
+
     // Kafka bootstrap servers and Zookeeper nodes can't be specified in the JSON
     private String kafkaBootstrapServers;
     private String zookeeperConnect;
@@ -81,6 +85,12 @@ public class EntityTopicOperator extends AbstractModel {
         this.readinessProbeOptions = DEFAULT_HEALTHCHECK_OPTIONS;
         this.livenessPath = "/";
         this.livenessProbeOptions = DEFAULT_HEALTHCHECK_OPTIONS;
+
+        // new KafkaStreamsTopicStore needs a bit more to start
+        this.startupProbeOptions = new ProbeBuilder()
+                .withPeriodSeconds(10)
+                .withFailureThreshold(12)
+                .build();
 
         // create a default configuration
         this.kafkaBootstrapServers = defaultBootstrapServers(cluster);
@@ -173,8 +183,8 @@ public class EntityTopicOperator extends AbstractModel {
      * @param cluster The cluster name.
      * @return The name of the role binding.
      */
-    public static String roleBindingName(String cluster) {
-        return "strimzi-" + cluster + "-entity-topic-operator";
+    public static String roleBindingForRoleName(String cluster) {
+        return cluster + "-entity-topic-operator-role";
     }
 
     @Override
@@ -207,7 +217,7 @@ public class EntityTopicOperator extends AbstractModel {
                 result.setOwnerReference(kafkaAssembly);
                 String image = topicOperatorSpec.getImage();
                 if (image == null) {
-                    image = System.getenv().getOrDefault(ClusterOperatorConfig.STRIMZI_DEFAULT_TOPIC_OPERATOR_IMAGE, "strimzi/operator:latest");
+                    image = System.getenv().getOrDefault(ClusterOperatorConfig.STRIMZI_DEFAULT_TOPIC_OPERATOR_IMAGE, "quay.io/strimzi/operator:latest");
                 }
                 result.setImage(image);
                 result.setWatchedNamespace(topicOperatorSpec.getWatchedNamespace() != null ? topicOperatorSpec.getWatchedNamespace() : namespace);
@@ -221,6 +231,9 @@ public class EntityTopicOperator extends AbstractModel {
                 }
                 result.setJvmOptions(topicOperatorSpec.getJvmOptions());
                 result.setResources(topicOperatorSpec.getResources());
+                if (topicOperatorSpec.getStartupProbe() != null) {
+                    result.setStartupProbe(topicOperatorSpec.getStartupProbe());
+                }
                 if (topicOperatorSpec.getReadinessProbe() != null) {
                     result.setReadinessProbe(topicOperatorSpec.getReadinessProbe());
                 }
@@ -241,6 +254,7 @@ public class EntityTopicOperator extends AbstractModel {
                 .withArgs("/opt/strimzi/bin/topic_operator_run.sh")
                 .withEnv(getEnvVars())
                 .withPorts(singletonList(createContainerPort(HEALTHCHECK_PORT_NAME, HEALTHCHECK_PORT, "TCP")))
+                .withStartupProbe(ProbeGenerator.httpProbe(startupProbeOptions, livenessPath + "healthy", HEALTHCHECK_PORT_NAME))
                 .withLivenessProbe(ProbeGenerator.httpProbe(livenessProbeOptions, livenessPath + "healthy", HEALTHCHECK_PORT_NAME))
                 .withReadinessProbe(ProbeGenerator.httpProbe(readinessProbeOptions, readinessPath + "ready", HEALTHCHECK_PORT_NAME))
                 .withResources(getResources())
@@ -273,16 +287,23 @@ public class EntityTopicOperator extends AbstractModel {
     }
 
     public List<Volume> getVolumes() {
-        return singletonList(VolumeUtils.createConfigMapVolume(logAndMetricsConfigVolumeName, ancillaryConfigMapName));
+        return asList(createTempDirVolume(TOPIC_OPERATOR_TMP_DIRECTORY_DEFAULT_VOLUME_NAME),
+                VolumeUtils.createConfigMapVolume(logAndMetricsConfigVolumeName, ancillaryConfigMapName));
     }
 
     private List<VolumeMount> getVolumeMounts() {
-        return asList(VolumeUtils.createVolumeMount(logAndMetricsConfigVolumeName, logAndMetricsConfigMountPath),
-            VolumeUtils.createVolumeMount(EntityOperator.TLS_SIDECAR_EO_CERTS_VOLUME_NAME, EntityOperator.TLS_SIDECAR_EO_CERTS_VOLUME_MOUNT),
-            VolumeUtils.createVolumeMount(EntityOperator.TLS_SIDECAR_CA_CERTS_VOLUME_NAME, EntityOperator.TLS_SIDECAR_CA_CERTS_VOLUME_MOUNT));
+        return asList(createTempDirVolumeMount(TOPIC_OPERATOR_TMP_DIRECTORY_DEFAULT_VOLUME_NAME),
+                VolumeUtils.createVolumeMount(logAndMetricsConfigVolumeName, logAndMetricsConfigMountPath),
+                VolumeUtils.createVolumeMount(EntityOperator.TLS_SIDECAR_EO_CERTS_VOLUME_NAME, EntityOperator.TLS_SIDECAR_EO_CERTS_VOLUME_MOUNT),
+                VolumeUtils.createVolumeMount(EntityOperator.TLS_SIDECAR_CA_CERTS_VOLUME_NAME, EntityOperator.TLS_SIDECAR_CA_CERTS_VOLUME_MOUNT));
     }
 
-    public RoleBinding generateRoleBinding(String namespace, String watchedNamespace) {
+    @Override
+    protected String getRoleName() {
+        return EntityOperator.getRoleName(cluster);
+    }
+
+    public RoleBinding generateRoleBindingForRole(String namespace, String watchedNamespace) {
         Subject ks = new SubjectBuilder()
                 .withKind("ServiceAccount")
                 .withName(EntityOperator.entityOperatorServiceAccountName(cluster))
@@ -290,21 +311,22 @@ public class EntityTopicOperator extends AbstractModel {
                 .build();
 
         RoleRef roleRef = new RoleRefBuilder()
-                .withName(EntityOperator.EO_CLUSTER_ROLE_NAME)
+                .withName(getRoleName())
                 .withApiGroup("rbac.authorization.k8s.io")
-                .withKind("ClusterRole")
+                .withKind("Role")
                 .build();
 
-        RoleBinding rb = new RoleBindingBuilder()
-                .withNewMetadata()
-                    .withName(roleBindingName(cluster))
-                    .withNamespace(watchedNamespace)
-                    .withOwnerReferences(createOwnerReference())
-                    .withLabels(labels.toMap())
-                .endMetadata()
-                .withRoleRef(roleRef)
-                .withSubjects(singletonList(ks))
-                .build();
+        RoleBinding rb = generateRoleBinding(
+                roleBindingForRoleName(cluster),
+                watchedNamespace,
+                roleRef,
+                singletonList(ks)
+        );
+
+        // We set OwnerReference only within the same namespace since it does not work cross-namespace
+        if (!namespace.equals(watchedNamespace)) {
+            rb.getMetadata().setOwnerReferences(Collections.emptyList());
+        }
 
         return rb;
     }

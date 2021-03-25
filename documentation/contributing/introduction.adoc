@@ -34,7 +34,7 @@ Documentation category folders contain files related to Strimzi guides (Deployin
 Assemblies, which usually encapsulate a feature or process, bring the related content contained in modules together.
 
 An assembly is like a sub-section or chapter in a book.
-For example, the _Deploying Strimzi_ guide has a chapter called _Verifying the Strimzi deployment_, which is contained in its own assembly.
+For example, the _Deploying and Upgrading Strimzi_ guide has a chapter called _Verifying the Strimzi deployment_, which is contained in its own assembly.
 
 .Documentation folder descriptions
 [source,options="nowrap",subs="+quotes"]
@@ -61,9 +61,9 @@ The guide also describes how Strimzi _Operators_ help manage a deployment.
 
 The guide contains high-level outlines of the processes required to deploy, configure, secure and monitor a deployment of Strimzi.
 
-=== Deploying Strimzi
+=== Deploying and Upgrading Strimzi
 
-The _Deploying Strimzi_ guide provides instructions on all the options available for deploying and upgrading Strimzi.
+The _Deploying and Upgrading Strimzi_ guide provides instructions on all the options available for deploying and upgrading Strimzi.
 The guide describes what is deployed, and the order of deployment required to run Apache Kafka in a Kubernetes cluster.
 
 As well as describing the deployment steps, the guide also provides pre- and post-deployment instructions to prepare for and verify a deployment.
@@ -76,7 +76,7 @@ Upgrade instructions are provided for Strimzi and Kafka upgrades.
 The _Strimzi Quick Start guide_ provides instructions for evaluating Strimzi using _Minikube_.
 The steps describe how to get a Strimzi deployment up-and-running as quickly as possible.
 
-In contrast to the _Deploying_ guide, this guide provides a reduced set of instructions for a specific type of deployment, with minimal configuration.
+In contrast to the _Deploying and Upgrading Strimzi_ guide, this guide provides a reduced set of instructions for a specific type of deployment, with minimal configuration.
 
 === Using Strimzi
 

@@ -7,14 +7,14 @@ package io.strimzi.systemtest.cruisecontrol;
 import io.strimzi.systemtest.AbstractST;
 import io.strimzi.operator.cluster.operator.resource.cruisecontrol.CruiseControlEndpoints;
 import io.strimzi.operator.cluster.operator.resource.cruisecontrol.CruiseControlUserTaskStatus;
-import io.strimzi.systemtest.resources.ResourceManager;
-import io.strimzi.systemtest.resources.crd.KafkaResource;
+import io.strimzi.systemtest.annotations.ParallelTest;
+import io.strimzi.systemtest.templates.crd.KafkaTemplates;
 import io.strimzi.systemtest.utils.specific.CruiseControlUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtensionContext;
 
 import static io.strimzi.systemtest.Constants.ACCEPTANCE;
 import static io.strimzi.systemtest.Constants.CRUISE_CONTROL;
@@ -30,11 +30,11 @@ public class CruiseControlApiST extends AbstractST {
 
     private static final Logger LOGGER = LogManager.getLogger(CruiseControlApiST.class);
     private static final String NAMESPACE = "cruise-control-api-test";
-
     private static final String CRUISE_CONTROL_NAME = "Cruise Control";
+    private final String cruiseControlApiClusterName = "cruise-control-api-cluster-name";
 
     @Tag(ACCEPTANCE)
-    @Test
+    @ParallelTest
     void testCruiseControlBasicAPIRequests()  {
         LOGGER.info("----> CRUISE CONTROL DEPLOYMENT STATE ENDPOINT <----");
 
@@ -113,10 +113,9 @@ public class CruiseControlApiST extends AbstractST {
     }
 
     @BeforeAll
-    void setup() throws Exception {
-        ResourceManager.setClassResources();
-        installClusterOperator(NAMESPACE);
+    void setup(ExtensionContext extensionContext) throws Exception {
+        installClusterOperator(extensionContext, NAMESPACE);
 
-        KafkaResource.kafkaWithCruiseControl(CLUSTER_NAME, 3, 3).done();
+        resourceManager.createResource(extensionContext, KafkaTemplates.kafkaWithCruiseControl(cruiseControlApiClusterName, 3, 3).build());
     }
 }

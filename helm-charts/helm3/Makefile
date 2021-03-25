@@ -1,15 +1,15 @@
 PROJECT_NAME=helm-charts
 
-include ../../Makefile.os
+include ../../../Makefile.os
 
 RELEASE_VERSION ?= latest
-CHART_SEMANTIC_RELEASE_VERSION ?= $(shell cat ../../release.version | tr A-Z a-z)
+CHART_SEMANTIC_RELEASE_VERSION ?= $(shell cat ../../../release.version | tr A-Z a-z)
 CHART_NAME=strimzi-kafka-operator
 CHART_PATH ?= ../helm3/strimzi-kafka-operator/
-CHART_RENDERED_TEMPLATES_TMP=../../target/charts
-CHART_RENDERED_TEMPLATES_CLUSTERROLES=../../cluster-operator/src/main/resources/cluster-roles/
+CHART_RENDERED_TEMPLATES_TMP=../../../target/charts
+CHART_RENDERED_TEMPLATES_CLUSTERROLES=../../../cluster-operator/src/main/resources/cluster-roles/
 CHART_RENDERED_TEMPLATES_INSTALL=../../install/cluster-operator/
-HELM_CLI=helm3
+HELM_CLI=helm
 
 helm_clean:
 	rm -rf $(CHART_RENDERED_TEMPLATES_TMP)
@@ -30,22 +30,22 @@ helm_install: helm_clean helm_template
 	# Remove Helm-related labels
 	$(FIND) $(CHART_RENDERED_TEMPLATES_TMP) -type f -name '*.yaml' -exec $(SED) -i '/^---/d' {} \;
 	$(FIND) $(CHART_RENDERED_TEMPLATES_TMP) -type f -name '*.yaml' -exec $(SED) -i '/^# Source: /d' {} \;
-	$(FIND) $(CHART_RENDERED_TEMPLATES_TMP) -type f -name '*.yaml' -exec yq d -i {} metadata.labels.chart \;
-	$(FIND) $(CHART_RENDERED_TEMPLATES_TMP) -type f -name '*.yaml' -exec yq d -i {} metadata.labels.component \;
-	$(FIND) $(CHART_RENDERED_TEMPLATES_TMP) -type f -name '*.yaml' -exec yq d -i {} metadata.labels.release \;
-	$(FIND) $(CHART_RENDERED_TEMPLATES_TMP) -type f -name '*.yaml' -exec yq d -i {} metadata.labels.heritage \;
-	$(FIND) $(CHART_RENDERED_TEMPLATES_TMP) -type f -name '*.yaml' -exec yq d -i {} metadata.namespace \;
+	$(FIND) $(CHART_RENDERED_TEMPLATES_TMP) -type f -name '*.yaml' -exec yq eval -i 'del .metadata.labels.chart' {} \;
+	$(FIND) $(CHART_RENDERED_TEMPLATES_TMP) -type f -name '*.yaml' -exec yq eval -i 'del .metadata.labels.component' {}  \;
+	$(FIND) $(CHART_RENDERED_TEMPLATES_TMP) -type f -name '*.yaml' -exec yq eval -i 'del .metadata.labels.release' {} \;
+	$(FIND) $(CHART_RENDERED_TEMPLATES_TMP) -type f -name '*.yaml' -exec yq eval -i 'del .metadata.labels.heritage' {} \;
+	$(FIND) $(CHART_RENDERED_TEMPLATES_TMP) -type f -name '*.yaml' -exec yq eval -i 'del .metadata.namespace' {} \;
 	# Copying rendered template files to: $(CHART_RENDERED_TEMPLATES_INSTALL)
 	mkdir -p $(CHART_RENDERED_TEMPLATES_INSTALL)
 	# Find rendered resources which are not CustomResourceDefinition and move them
-	$(FIND) $(CHART_RENDERED_TEMPLATES_TMP) -type f -name '*.yaml' -printf "%p " -exec yq r {} kind \; \
+	$(FIND) $(CHART_RENDERED_TEMPLATES_TMP) -type f -name '*.yaml' -printf "%p " -exec yq eval '.kind' {} \; \
 	| grep -v 'CustomResourceDefinition$$' \
 	| $(SED) -E 's/([^ ]*) ([a-zA-Z0-9]*)$$/\1/' \
 	| xargs -IFILE $(CP) FILE $(CHART_RENDERED_TEMPLATES_INSTALL)
 	# Copying rendered template files to: $(CHART_RENDERED_TEMPLATES_CLUSTERROLES)
 	mkdir -p $(CHART_RENDERED_TEMPLATES_CLUSTERROLES)
 	# Find rendered resources which are not CustomResourceDefinition and move them
-	$(FIND) $(CHART_RENDERED_TEMPLATES_TMP) -type f -name '*ClusterRole-*.yaml' -printf "%p " -exec yq r {} kind \; \
+	$(FIND) $(CHART_RENDERED_TEMPLATES_TMP) -type f -name '*ClusterRole-*.yaml' -printf "%p " -exec yq eval '.kind' {} \; \
 	| $(SED) -E 's/([^ ]*) ([a-zA-Z0-9]*)$$/\1/' \
 	| xargs -IFILE $(CP) FILE $(CHART_RENDERED_TEMPLATES_CLUSTERROLES)
 

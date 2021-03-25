@@ -17,6 +17,7 @@ import io.strimzi.crdgenerator.annotations.Description;
 import io.strimzi.crdgenerator.annotations.DescriptionFile;
 import io.strimzi.crdgenerator.annotations.KubeLink;
 import io.strimzi.crdgenerator.annotations.Minimum;
+import io.strimzi.crdgenerator.annotations.PresentInVersions;
 import io.sundr.builder.annotations.Buildable;
 import lombok.EqualsAndHashCode;
 
@@ -30,12 +31,12 @@ import java.util.Map;
 )
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @JsonPropertyOrder({
-        "replicas", "image", "whitelist",
-        "consumer", "producer", "resources",
+        "version", "replicas", "image", "consumer",
+        "producer", "resources", "whitelist",
         "affinity", "tolerations", "jvmOptions",
-        "logging", "metrics", "tracing", "template"})
+        "logging", "metrics", "metricsConfig", "tracing", "template"})
 @EqualsAndHashCode
-public class KafkaMirrorMakerSpec extends Spec {
+public class KafkaMirrorMakerSpec extends Spec implements HasConfigurableMetrics {
     private static final long serialVersionUID = 1L;
 
     private static final int DEFAULT_REPLICAS = 3;
@@ -55,6 +56,7 @@ public class KafkaMirrorMakerSpec extends Spec {
     private JvmOptions jvmOptions;
     private Logging logging;
     private Map<String, Object> metrics;
+    private MetricsConfig metricsConfig;
     private Tracing tracing;
     private KafkaMirrorMakerTemplate template;
 
@@ -121,15 +123,32 @@ public class KafkaMirrorMakerSpec extends Spec {
         this.producer = producer;
     }
 
+    @DeprecatedProperty(movedToPath = "spec.metricsConfig", removalVersion = "v1beta2")
+    @PresentInVersions("v1alpha1-v1beta1")
+    @Deprecated
     @JsonInclude(JsonInclude.Include.NON_NULL)
     @Description("The Prometheus JMX Exporter configuration. " +
             "See {JMXExporter} for details of the structure of this configuration.")
+    @Override
     public Map<String, Object> getMetrics() {
         return metrics;
     }
 
+    @Override
     public void setMetrics(Map<String, Object> metrics) {
         this.metrics = metrics;
+    }
+
+    @Description("Metrics configuration.")
+    @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    @Override
+    public MetricsConfig getMetricsConfig() {
+        return metricsConfig;
+    }
+
+    @Override
+    public void setMetricsConfig(MetricsConfig metricsConfig) {
+        this.metricsConfig = metricsConfig;
     }
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -165,7 +184,8 @@ public class KafkaMirrorMakerSpec extends Spec {
     @Description("The pod's affinity rules.")
     @KubeLink(group = "core", version = "v1", kind = "affinity")
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    @DeprecatedProperty(movedToPath = "spec.template.pod.affinity")
+    @DeprecatedProperty(movedToPath = "spec.template.pod.affinity", removalVersion = "v1beta2")
+    @PresentInVersions("v1alpha1-v1beta1")
     @Deprecated
     public Affinity getAffinity() {
         return affinity;
@@ -179,7 +199,8 @@ public class KafkaMirrorMakerSpec extends Spec {
     @Description("The pod's tolerations.")
     @KubeLink(group = "core", version = "v1", kind = "toleration")
     @JsonInclude(JsonInclude.Include.NON_EMPTY)
-    @DeprecatedProperty(movedToPath = "spec.template.pod.tolerations")
+    @DeprecatedProperty(movedToPath = "spec.template.pod.tolerations", removalVersion = "v1beta2")
+    @PresentInVersions("v1alpha1-v1beta1")
     @Deprecated
     public List<Toleration> getTolerations() {
         return tolerations;

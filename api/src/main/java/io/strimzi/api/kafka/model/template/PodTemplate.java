@@ -11,6 +11,7 @@ import io.fabric8.kubernetes.api.model.HostAlias;
 import io.fabric8.kubernetes.api.model.LocalObjectReference;
 import io.fabric8.kubernetes.api.model.PodSecurityContext;
 import io.fabric8.kubernetes.api.model.Toleration;
+import io.fabric8.kubernetes.api.model.TopologySpreadConstraint;
 import io.strimzi.api.kafka.model.Constants;
 import io.strimzi.api.kafka.model.UnknownPropertyPreserving;
 import io.strimzi.crdgenerator.annotations.Description;
@@ -33,9 +34,9 @@ import java.util.Map;
         editableEnabled = false,
         builderPackage = Constants.FABRIC8_KUBERNETES_API
 )
-@JsonInclude(JsonInclude.Include.NON_NULL)
+@JsonInclude(JsonInclude.Include.NON_DEFAULT)
 @JsonPropertyOrder({"metadata", "imagePullSecrets", "securityContext", "terminationGracePeriodSeconds", "affinity",
-        "tolerations", "priorityClassName", "schedulerName", "hostAliases"})
+        "tolerations", "topologySpreadConstraint", "priorityClassName", "schedulerName", "hostAliases"})
 @EqualsAndHashCode
 @DescriptionFile
 public class PodTemplate implements Serializable, UnknownPropertyPreserving {
@@ -47,6 +48,7 @@ public class PodTemplate implements Serializable, UnknownPropertyPreserving {
     private int terminationGracePeriodSeconds = 30;
     private Affinity affinity;
     private List<Toleration> tolerations;
+    private List<TopologySpreadConstraint> topologySpreadConstraints;
     private String priorityClassName;
     private String schedulerName;
     private List<HostAlias> hostAliases;
@@ -91,7 +93,7 @@ public class PodTemplate implements Serializable, UnknownPropertyPreserving {
             "A zero value indicates delete immediately. " +
             "You might need to increase the grace period for very large Kafka clusters, so that the Kafka brokers have enough time to transfer their work to another broker before they are terminated. " +
             "Defaults to 30 seconds.")
-    @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    @JsonInclude(JsonInclude.Include.NON_DEFAULT)
     @DefaultValue("30")
     @Minimum(0)
     public int getTerminationGracePeriodSeconds() {
@@ -122,6 +124,17 @@ public class PodTemplate implements Serializable, UnknownPropertyPreserving {
 
     public void setTolerations(List<Toleration> tolerations) {
         this.tolerations = tolerations;
+    }
+
+    @Description("The pod's topology spread constraints.")
+    @KubeLink(group = "core", version = "v1", kind = "topologyspreadconstraint")
+    @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    public List<TopologySpreadConstraint> getTopologySpreadConstraints() {
+        return topologySpreadConstraints;
+    }
+
+    public void setTopologySpreadConstraints(List<TopologySpreadConstraint> topologySpreadConstraints) {
+        this.topologySpreadConstraints = topologySpreadConstraints;
     }
 
     @Description("The name of the priority class used to assign priority to the pods. " +

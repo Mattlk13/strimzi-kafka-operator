@@ -6,15 +6,14 @@ package io.strimzi.operator.cluster.operator.assembly;
 
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.strimzi.api.kafka.KafkaRebalanceList;
-import io.strimzi.api.kafka.model.DoneableKafkaRebalance;
 import io.strimzi.api.kafka.model.KafkaRebalance;
 import io.strimzi.api.kafka.model.KafkaRebalanceBuilder;
 import io.strimzi.api.kafka.model.KafkaRebalanceSpec;
 import io.strimzi.api.kafka.model.KafkaRebalanceSpecBuilder;
-import io.strimzi.api.kafka.model.status.Condition;
-import io.strimzi.api.kafka.model.status.KafkaRebalanceStatus;
 import io.strimzi.api.kafka.model.balancing.KafkaRebalanceAnnotation;
 import io.strimzi.api.kafka.model.balancing.KafkaRebalanceState;
+import io.strimzi.api.kafka.model.status.Condition;
+import io.strimzi.api.kafka.model.status.KafkaRebalanceStatus;
 import io.strimzi.operator.KubernetesVersion;
 import io.strimzi.operator.PlatformFeaturesAvailability;
 import io.strimzi.operator.cluster.ResourceUtils;
@@ -34,8 +33,6 @@ import io.vertx.core.Vertx;
 import io.vertx.junit5.Timeout;
 import io.vertx.junit5.VertxExtension;
 import io.vertx.junit5.VertxTestContext;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -50,8 +47,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
+import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(VertxExtension.class)
@@ -62,9 +59,7 @@ public class KafkaRebalanceStateMachineTest {
     private static final String CLUSTER_NAMESPACE = "cruise-control-namespace";
     private static final String CLUSTER_NAME = "kafka-cruise-control-test-cluster";
 
-    private final KubernetesVersion kubernetesVersion = KubernetesVersion.V1_11;
-
-    private static final Logger log = LogManager.getLogger(KafkaRebalanceStateMachineTest.class.getName());
+    private final KubernetesVersion kubernetesVersion = KubernetesVersion.V1_18;
 
     private static ClientAndServer ccServer;
 
@@ -81,30 +76,6 @@ public class KafkaRebalanceStateMachineTest {
     @BeforeEach
     public void resetServer() {
         ccServer.reset();
-    }
-
-    /**
-     * Checks all conditions in the supplied status to see if type of one of them matches the supplied rebalance state.
-     *
-     * @param  received The status instance to be checked.
-     * @param expectedState The expected rebalance state to be searched for.
-     * @return True if any of the conditions in the supplied status are of a type matching the supplied expected state.
-     */
-    public static boolean expectedStatusCheck(KafkaRebalanceStatus received, KafkaRebalanceState expectedState) {
-
-        List<String> foundStatuses = new ArrayList<>();
-
-        for (Condition condition :  received.getConditions()) {
-            String type = condition.getType();
-            if (type.equals(expectedState.toString())) {
-                log.info("Found condition with expected state: " + expectedState.toString());
-                return true;
-            } else {
-                foundStatuses.add(type);
-            }
-        }
-        log.error("Expected : " + expectedState.toString() + " but found : " + foundStatuses);
-        return false;
     }
 
     /**
@@ -166,7 +137,7 @@ public class KafkaRebalanceStateMachineTest {
         CruiseControlApi client = new CruiseControlApiImpl(vertx);
         ResourceOperatorSupplier supplier = ResourceUtils.supplierWithMocks(true);
         PlatformFeaturesAvailability pfa = new PlatformFeaturesAvailability(true, kubernetesVersion);
-        KafkaRebalanceAssemblyOperator kcrao = new KafkaRebalanceAssemblyOperator(vertx, pfa, supplier) {
+        KafkaRebalanceAssemblyOperator kcrao = new KafkaRebalanceAssemblyOperator(vertx, pfa, supplier, ResourceUtils.dummyClusterOperatorConfig()) {
             @Override
             public String cruiseControlHost(String clusterName, String clusterNamespace) {
                 return HOST;
@@ -189,8 +160,7 @@ public class KafkaRebalanceStateMachineTest {
 
         CrdOperator<KubernetesClient,
                 KafkaRebalance,
-                KafkaRebalanceList,
-                DoneableKafkaRebalance> mockRebalanceOps = supplier.kafkaRebalanceOperator;
+                KafkaRebalanceList> mockRebalanceOps = supplier.kafkaRebalanceOperator;
 
         when(mockRebalanceOps.get(CLUSTER_NAMESPACE, RESOURCE_NAME)).thenReturn(kcRebalance);
         when(mockRebalanceOps.getAsync(CLUSTER_NAMESPACE, RESOURCE_NAME)).thenReturn(Future.succeededFuture(kcRebalance));
@@ -198,7 +168,7 @@ public class KafkaRebalanceStateMachineTest {
         return kcrao.computeNextStatus(recon, HOST, client, kcRebalance, currentState, initialAnnotation, rbOptions)
                 .compose(result -> {
                     context.verify(() -> {
-                        assertTrue(expectedStatusCheck(result, nextState));
+                        assertThat(result.getConditions(), StateMatchers.hasStateInConditions(nextState));
                     });
                     return Future.succeededFuture(result);
                 });
@@ -531,6 +501,10 @@ public class KafkaRebalanceStateMachineTest {
                 KafkaRebalanceState.Stopped, KafkaRebalanceState.PendingProposal,
                 KafkaRebalanceAnnotation.refresh, null, null)
                 .onComplete(result -> checkOptimizationResults(result, context, true));
+
+    }
+
+    private static class StateMatchers extends AbstractResourceStateMatchers {
 
     }
 }

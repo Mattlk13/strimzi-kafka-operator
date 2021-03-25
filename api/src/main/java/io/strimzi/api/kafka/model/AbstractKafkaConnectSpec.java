@@ -5,6 +5,7 @@
 package io.strimzi.api.kafka.model;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonPropertyOrder;
 import io.fabric8.kubernetes.api.model.Affinity;
 import io.fabric8.kubernetes.api.model.ResourceRequirements;
@@ -15,6 +16,7 @@ import io.strimzi.api.kafka.model.template.KafkaConnectTemplate;
 import io.strimzi.api.kafka.model.tracing.Tracing;
 import io.strimzi.crdgenerator.annotations.Description;
 import io.strimzi.crdgenerator.annotations.KubeLink;
+import io.strimzi.crdgenerator.annotations.PresentInVersions;
 import io.sundr.builder.annotations.Buildable;
 import io.vertx.core.cli.annotations.DefaultValue;
 import lombok.EqualsAndHashCode;
@@ -28,11 +30,11 @@ import java.util.Map;
 )
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @JsonPropertyOrder({ "replicas", "version", "image", "resources", 
-        "livenessProbe", "readinessProbe", "jvmOptions",
-        "affinity", "tolerations", "logging", "metrics", "tracing", 
+        "livenessProbe", "readinessProbe", "jvmOptions",  "jmxOptions",
+        "affinity", "tolerations", "logging", "metrics", "metricsConfig", "tracing",
         "template", "externalConfiguration"})
 @EqualsAndHashCode(doNotUseGetters = true)
-public abstract class AbstractKafkaConnectSpec extends Spec {
+public abstract class AbstractKafkaConnectSpec extends Spec implements HasConfigurableMetrics {
     private static final long serialVersionUID = 1L;
 
     private Logging logging;
@@ -43,7 +45,9 @@ public abstract class AbstractKafkaConnectSpec extends Spec {
     private ResourceRequirements resources;
     private Probe livenessProbe;
     private Probe readinessProbe;
+    private KafkaJmxOptions jmxOptions;
     private JvmOptions jvmOptions;
+    private MetricsConfig metricsConfig;
     private Map<String, Object> metrics;
     private Tracing tracing;
     private Affinity affinity;
@@ -58,9 +62,9 @@ public abstract class AbstractKafkaConnectSpec extends Spec {
     }
 
     @Description("Logging configuration for Kafka Connect")
-    @JsonInclude(value = JsonInclude.Include.NON_NULL)
+    @JsonInclude(value = JsonInclude.Include.NON_EMPTY)
     public Logging getLogging() {
-        return logging == null ? new InlineLogging() : logging;
+        return logging;
     }
 
     public void setLogging(Logging logging) {
@@ -112,7 +116,7 @@ public abstract class AbstractKafkaConnectSpec extends Spec {
         this.livenessProbe = livenessProbe;
     }
 
-    @JsonInclude(JsonInclude.Include.NON_DEFAULT)
+    @JsonInclude(JsonInclude.Include.NON_EMPTY)
     @Description("Pod readiness checking.")
     public Probe getReadinessProbe() {
         return readinessProbe;
@@ -132,13 +136,41 @@ public abstract class AbstractKafkaConnectSpec extends Spec {
         this.jvmOptions = jvmOptions;
     }
 
+    @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    @Description("JMX Options")
+    @JsonProperty("jmxOptions")
+    public KafkaJmxOptions getJmxOptions() {
+        return jmxOptions;
+    }
+
+    public void setJmxOptions(KafkaJmxOptions jmxOptions) {
+        this.jmxOptions = jmxOptions;
+    }
+
+    @Description("Metrics configuration.")
+    @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    @Override
+    public MetricsConfig getMetricsConfig() {
+        return metricsConfig;
+    }
+
+    @Override
+    public void setMetricsConfig(MetricsConfig metricsConfig) {
+        this.metricsConfig = metricsConfig;
+    }
+
+    @DeprecatedProperty(movedToPath = "spec.metricsConfig", removalVersion = "v1beta2")
+    @PresentInVersions("v1alpha1-v1beta1")
+    @Deprecated
     @JsonInclude(JsonInclude.Include.NON_NULL)
     @Description("The Prometheus JMX Exporter configuration. " +
             "See https://github.com/prometheus/jmx_exporter for details of the structure of this configuration.")
+    @Override
     public Map<String, Object> getMetrics() {
         return metrics;
     }
 
+    @Override
     public void setMetrics(Map<String, Object> metrics) {
         this.metrics = metrics;
     }
@@ -153,10 +185,11 @@ public abstract class AbstractKafkaConnectSpec extends Spec {
         this.tracing = tracing;
     }
 
+    @PresentInVersions("v1alpha1-v1beta1")
     @Description("The pod's affinity rules.")
     @KubeLink(group = "core", version = "v1", kind = "affinity")
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    @DeprecatedProperty(movedToPath = "spec.template.pod.affinity")
+    @DeprecatedProperty(movedToPath = "spec.template.pod.affinity", removalVersion = "v1beta2")
     @Deprecated
     public Affinity getAffinity() {
         return affinity;
@@ -167,10 +200,11 @@ public abstract class AbstractKafkaConnectSpec extends Spec {
         this.affinity = affinity;
     }
 
+    @PresentInVersions("v1alpha1-v1beta1")
     @Description("The pod's tolerations.")
     @KubeLink(group = "core", version = "v1", kind = "toleration")
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    @DeprecatedProperty(movedToPath = "spec.template.pod.tolerations")
+    @DeprecatedProperty(movedToPath = "spec.template.pod.tolerations", removalVersion = "v1beta2")
     @Deprecated
     public List<Toleration> getTolerations() {
         return tolerations;

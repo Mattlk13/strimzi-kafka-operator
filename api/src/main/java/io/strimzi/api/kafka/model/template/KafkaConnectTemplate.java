@@ -30,21 +30,25 @@ import java.util.Map;
 public class KafkaConnectTemplate implements Serializable, UnknownPropertyPreserving {
     private static final long serialVersionUID = 1L;
 
-    private ResourceTemplate deployment;
+    private DeploymentTemplate deployment;
     private PodTemplate pod;
+    private PodTemplate buildPod;
     private ResourceTemplate apiService;
     private PodDisruptionBudgetTemplate podDisruptionBudget;
     private ContainerTemplate connectContainer;
     private ContainerTemplate initContainer;
+    private ContainerTemplate buildContainer;
+    private ResourceTemplate buildConfig;
+    private ResourceTemplate clusterRoleBinding;
     private Map<String, Object> additionalProperties = new HashMap<>(0);
 
     @Description("Template for Kafka Connect `Deployment`.")
     @JsonInclude(JsonInclude.Include.NON_EMPTY)
-    public ResourceTemplate getDeployment() {
+    public DeploymentTemplate getDeployment() {
         return deployment;
     }
 
-    public void setDeployment(ResourceTemplate deployment) {
+    public void setDeployment(DeploymentTemplate deployment) {
         this.deployment = deployment;
     }
 
@@ -56,6 +60,17 @@ public class KafkaConnectTemplate implements Serializable, UnknownPropertyPreser
 
     public void setPod(PodTemplate pod) {
         this.pod = pod;
+    }
+
+    @Description("Template for Kafka Connect Build `Pods`. " +
+            "The build pod is used only on Kubernetes.")
+    @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    public PodTemplate getBuildPod() {
+        return buildPod;
+    }
+
+    public void setBuildPod(PodTemplate buildPod) {
+        this.buildPod = buildPod;
     }
 
     @Description("Template for Kafka Connect API `Service`.")
@@ -96,6 +111,38 @@ public class KafkaConnectTemplate implements Serializable, UnknownPropertyPreser
 
     public void setInitContainer(ContainerTemplate initContainer) {
         this.initContainer = initContainer;
+    }
+
+    @Description("Template for the Kafka Connect Build container. " +
+            "The build container is used only on Kubernetes.")
+    @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    public ContainerTemplate getBuildContainer() {
+        return buildContainer;
+    }
+
+    public void setBuildContainer(ContainerTemplate buildContainer) {
+        this.buildContainer = buildContainer;
+    }
+
+    @Description("Template for the Kafka Connect BuildConfig used to build new container images. " +
+            "The BuildConfig is used only on OpenShift.")
+    @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    public ResourceTemplate getBuildConfig() {
+        return buildConfig;
+    }
+
+    public void setBuildConfig(ResourceTemplate buildConfig) {
+        this.buildConfig = buildConfig;
+    }
+
+    @Description("Template for the Kafka Connect ClusterRoleBinding.")
+    @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    public ResourceTemplate getClusterRoleBinding() {
+        return clusterRoleBinding;
+    }
+
+    public void setClusterRoleBinding(ResourceTemplate clusterRoleBinding) {
+        this.clusterRoleBinding = clusterRoleBinding;
     }
 
     @Override

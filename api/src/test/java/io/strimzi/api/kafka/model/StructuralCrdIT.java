@@ -17,38 +17,57 @@ import io.fabric8.kubernetes.api.model.apiextensions.v1beta1.CustomResourceDefin
 import io.fabric8.kubernetes.api.model.apiextensions.v1beta1.CustomResourceDefinitionVersion;
 import io.strimzi.api.annotations.ApiVersion;
 import io.strimzi.api.annotations.VersionRange;
+import io.strimzi.test.TestUtils;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
 public class StructuralCrdIT extends AbstractCrdIT {
-
+    Map<String, String> crdFiles = Map.of(
+            "kafkas.kafka.strimzi.io", "040-Crd-kafka.yaml",
+            "kafkaconnects.kafka.strimzi.io", "041-Crd-kafkaconnect.yaml",
+            "kafkaconnects2is.kafka.strimzi.io", "042-Crd-kafkaconnects2i.yaml",
+            "kafkatopics.kafka.strimzi.io", "043-Crd-kafkatopic.yaml",
+            "kafkausers.kafka.strimzi.io", "044-Crd-kafkauser.yaml",
+            "kafkamirrormakers.kafka.strimzi.io", "045-Crd-kafkamirrormaker.yaml",
+            "kafkabridges.kafka.strimzi.io", "046-Crd-kafkabridge.yaml",
+            "kafkaconnectors.kafka.strimzi.io", "047-Crd-kafkaconnector.yaml",
+            "kafkamirrormaker2s.kafka.strimzi.io", "048-Crd-kafkamirrormaker2.yaml",
+            "kafkarebalances.kafka.strimzi.io", "049-Crd-kafkarebalance.yaml"
+    );
+    
     @Test
-    public void kafkaV1Beta2IsStructuralWithCrdV1Beta1() {
+    public void v1Beta2IsStructuralWithCrdV1Beta1() {
         assumeKube1_16Plus();
-        assertApiVersionsAreStructural("kafkas.kafka.strimzi.io",
-                ApiVersion.V1BETA1,
-                "040-Crd-kafka-crdApi-v1beta1.yaml",
-                ApiVersion.parseRange("v1beta2+"));
+
+        for (Map.Entry<String, String> crd : crdFiles.entrySet()) {
+            assertApiVersionsAreStructural(crd.getKey(),
+                    ApiVersion.V1BETA1,
+                    TestUtils.USER_PATH + "/./src/test/resources/io/strimzi/api/kafka/model/" + crd.getValue(),
+                    ApiVersion.parseRange("v1beta2+"));
+        }
     }
 
     @Test
-    public void kafkaV1Beta2IsStructuralWithCrdV1() {
+    public void v1Beta2IsStructuralWithCrdV1() {
         assumeKube1_16Plus();
-        assertApiVersionsAreStructural("kafkas.kafka.strimzi.io",
-                ApiVersion.V1,
-                "040-Crd-kafka-crdApi-v1.yaml",
-                ApiVersion.parseRange("v1beta2+"));
+
+        for (Map.Entry<String, String> crd : crdFiles.entrySet()) {
+            assertApiVersionsAreStructural(crd.getKey(),
+                    ApiVersion.V1,
+                    TestUtils.USER_PATH + "/../packaging/install/cluster-operator/" + crd.getValue(),
+                    ApiVersion.parseRange("v1beta2+"));
+        }
     }
 
     private void assertApiVersionsAreStructural(String api, ApiVersion crdApiVersion, String crdYaml, VersionRange<ApiVersion> shouldBeStructural) {
-        cluster.createCustomResources("src/test/resources/io/strimzi/api/kafka/model/" + crdYaml);
+        cluster.createCustomResources(crdYaml);
         try {
-            waitForCrd("crd", "kafkas.kafka.strimzi.io");
+            waitForCrd("crd", api);
             assertApiVersionsAreStructural(api, crdApiVersion, shouldBeStructural);
         } finally {
-            cluster.deleteCustomResources("src/test/resources/io/strimzi/api/kafka/model/" + crdYaml);
+            cluster.deleteCustomResources(crdYaml);
         }
     }
 

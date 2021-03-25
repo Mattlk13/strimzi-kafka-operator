@@ -6,11 +6,12 @@ package io.strimzi.operator.common.operator.resource;
 
 import io.fabric8.kubernetes.api.model.DeletionPropagation;
 import io.fabric8.kubernetes.api.model.IntOrString;
-import io.fabric8.kubernetes.api.model.policy.DoneablePodDisruptionBudget;
 import io.fabric8.kubernetes.api.model.policy.PodDisruptionBudget;
 import io.fabric8.kubernetes.api.model.policy.PodDisruptionBudgetBuilder;
 import io.fabric8.kubernetes.api.model.policy.PodDisruptionBudgetList;
 import io.fabric8.kubernetes.client.KubernetesClient;
+import io.fabric8.kubernetes.client.Watch;
+import io.fabric8.kubernetes.client.Watcher;
 import io.fabric8.kubernetes.client.dsl.MixedOperation;
 import io.fabric8.kubernetes.client.dsl.NonNamespaceOperation;
 import io.fabric8.kubernetes.client.dsl.PolicyAPIGroupDSL;
@@ -28,7 +29,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-public class PodDisruptionBudgetOperatorTest extends AbstractResourceOperatorTest<KubernetesClient, PodDisruptionBudget, PodDisruptionBudgetList, DoneablePodDisruptionBudget, Resource<PodDisruptionBudget, DoneablePodDisruptionBudget>> {
+public class PodDisruptionBudgetOperatorTest extends AbstractResourceOperatorTest<KubernetesClient, PodDisruptionBudget, PodDisruptionBudgetList, Resource<PodDisruptionBudget>> {
 
     @Override
     protected void  mocker(KubernetesClient mockClient, MixedOperation op) {
@@ -38,7 +39,7 @@ public class PodDisruptionBudgetOperatorTest extends AbstractResourceOperatorTes
     }
 
     @Override
-    protected AbstractResourceOperator<KubernetesClient, PodDisruptionBudget, PodDisruptionBudgetList, DoneablePodDisruptionBudget, Resource<PodDisruptionBudget, DoneablePodDisruptionBudget>> createResourceOperations(Vertx vertx, KubernetesClient mockClient) {
+    protected AbstractResourceOperator<KubernetesClient, PodDisruptionBudget, PodDisruptionBudgetList, Resource<PodDisruptionBudget>> createResourceOperations(Vertx vertx, KubernetesClient mockClient) {
         return new PodDisruptionBudgetOperator(vertx, mockClient);
     }
 
@@ -76,6 +77,13 @@ public class PodDisruptionBudgetOperatorTest extends AbstractResourceOperatorTes
         when(mockResource.get()).thenReturn(existingResource);
         when(mockResource.withPropagationPolicy(DeletionPropagation.FOREGROUND)).thenReturn(mockResource);
         when(mockResource.patch(any())).thenReturn(existingResource);
+        when(mockResource.watch(any())).thenAnswer(invocation -> {
+            Watcher watcher = invocation.getArgument(0);
+            watcher.eventReceived(Watcher.Action.DELETED, existingResource);
+            return (Watch) () -> {
+
+            };
+        });
 
         NonNamespaceOperation mockNameable = mock(NonNamespaceOperation.class);
         when(mockNameable.withName(matches(existingResource.getMetadata().getName()))).thenReturn(mockResource);
@@ -91,7 +99,7 @@ public class PodDisruptionBudgetOperatorTest extends AbstractResourceOperatorTes
             verify(mockResource).get();
             verify(mockResource).patch(any());
             verify(mockResource, never()).create(any());
-            verify(mockResource, never()).createNew();
+            verify(mockResource, never()).create();
             verify(mockResource, never()).createOrReplace(any());
             verify(mockCms, never()).createOrReplace(any());
             async.flag();
@@ -122,7 +130,7 @@ public class PodDisruptionBudgetOperatorTest extends AbstractResourceOperatorTes
             verify(mockResource).get();
             verify(mockResource, never()).patch(any());
             verify(mockResource, never()).create(any());
-            verify(mockResource, never()).createNew();
+            verify(mockResource, never()).create();
             verify(mockResource, never()).createOrReplace(any());
             verify(mockCms, never()).createOrReplace(any());
             async.flag();

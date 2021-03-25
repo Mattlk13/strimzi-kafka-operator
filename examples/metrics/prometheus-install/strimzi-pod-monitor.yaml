@@ -52,7 +52,7 @@ spec:
 apiVersion: monitoring.coreos.com/v1
 kind: PodMonitor
 metadata:
-  name: kafka-and-cruise-control-metrics
+  name: kafka-resources-metrics
   labels:
     app: strimzi
 spec:
@@ -60,7 +60,7 @@ spec:
     matchExpressions:
       - key: "strimzi.io/kind"
         operator: In
-        values: ["Kafka", "KafkaConnect"]
+        values: ["Kafka", "KafkaConnect", "KafkaConnectS2I", "KafkaMirrorMaker", "KafkaMirrorMaker2"]
   namespaceSelector:
     matchNames:
       - myproject
@@ -69,7 +69,7 @@ spec:
     port: tcp-prometheus
     relabelings:
     - separator: ;
-      regex: __meta_kubernetes_pod_label_(.+)
+      regex: __meta_kubernetes_pod_label_(strimzi_io_.+)
       replacement: $1
       action: labelmap
     - sourceLabels: [__meta_kubernetes_namespace]
@@ -96,4 +96,3 @@ spec:
       targetLabel: node_ip
       replacement: $1
       action: replace
-    

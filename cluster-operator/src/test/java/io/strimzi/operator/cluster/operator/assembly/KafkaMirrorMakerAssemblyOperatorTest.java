@@ -85,7 +85,7 @@ public class KafkaMirrorMakerAssemblyOperatorTest {
     private final String whitelist = ".*";
     private final String image = "my-image:latest";
 
-    private final KubernetesVersion kubernetesVersion = KubernetesVersion.V1_9;
+    private final KubernetesVersion kubernetesVersion = KubernetesVersion.V1_16;
 
     @BeforeAll
     public static void before() {
@@ -578,7 +578,6 @@ public class KafkaMirrorMakerAssemblyOperatorTest {
                 .build();
         Map<String, Object> metricsCm = new HashMap<>();
         metricsCm.put("foo", "bar");
-
         KafkaMirrorMaker foo = ResourceUtils.createKafkaMirrorMaker(kmmNamespace, "foo", image, producer, consumer, whitelist, metricsCm);
         KafkaMirrorMaker bar = ResourceUtils.createKafkaMirrorMaker(kmmNamespace, "bar", image, producer, consumer, whitelist, metricsCm);
 
@@ -710,7 +709,6 @@ public class KafkaMirrorMakerAssemblyOperatorTest {
                 .build();
         Map<String, Object> metricsCm = new HashMap<>();
         metricsCm.put("foo", "bar");
-
         KafkaMirrorMaker kmm = ResourceUtils.createKafkaMirrorMaker(kmmNamespace, kmmName, image, 0, producer, consumer, whitelist, metricsCm);
 
         when(mockMirrorOps.get(kmmNamespace, kmmName)).thenReturn(kmm);

@@ -9,7 +9,6 @@ import io.fabric8.kubernetes.api.model.apiextensions.v1beta1.CustomResourceDefin
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.strimzi.api.kafka.Crds;
 import io.strimzi.api.kafka.KafkaList;
-import io.strimzi.api.kafka.model.DoneableKafka;
 import io.strimzi.api.kafka.model.Kafka;
 import io.strimzi.api.kafka.model.KafkaBuilder;
 import io.strimzi.api.kafka.model.storage.JbodStorage;
@@ -43,14 +42,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
-import java.io.StringReader;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import static java.util.Collections.emptyMap;
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.MatcherAssert.assertThat;
 
@@ -59,13 +56,7 @@ public class JbodStorageTest {
 
     private static final String NAMESPACE = "test-jbod-storage";
     private static final String NAME = "my-kafka";
-    private static final KafkaVersion.Lookup VERSIONS = new KafkaVersion.Lookup(
-            new StringReader(KafkaVersionTestUtils.getKafkaVersionYaml()),
-            KafkaVersionTestUtils.getKafkaImageMap(),
-            emptyMap(),
-            emptyMap(),
-            emptyMap(), 
-            emptyMap()) { };
+    private static final KafkaVersion.Lookup VERSIONS = KafkaVersionTestUtils.getKafkaVersionLookup();
 
     private static Vertx vertx;
     private Kafka kafka;
@@ -106,6 +97,9 @@ public class JbodStorageTest {
                     .withNewKafka()
                         .withReplicas(3)
                         .withNewListeners()
+                            .withNewKafkaListeners()
+                                .withPlain(null)
+                            .endKafkaListeners()
                         .endListeners()
                         .withNewJbodStorage()
                             .withVolumes(volumes)
@@ -122,14 +116,14 @@ public class JbodStorageTest {
 
         // setting up a mock Kubernetes client
         this.mockClient = new MockKube()
-                .withCustomResourceDefinition(kafkaAssemblyCrd, Kafka.class, KafkaList.class, DoneableKafka.class)
+                .withCustomResourceDefinition(kafkaAssemblyCrd, Kafka.class, KafkaList.class)
                 .end()
                 .build();
 
         // initialize a Kafka in MockKube
         Crds.kafkaOperation(this.mockClient).inNamespace(NAMESPACE).withName(NAME).create(this.kafka);
 
-        PlatformFeaturesAvailability pfa = new PlatformFeaturesAvailability(false, KubernetesVersion.V1_9);
+        PlatformFeaturesAvailability pfa = new PlatformFeaturesAvailability(false, KubernetesVersion.V1_16);
         // creating the Kafka operator
         ResourceOperatorSupplier ros =
                 new ResourceOperatorSupplier(this.vertx, this.mockClient,
@@ -165,7 +159,7 @@ public class JbodStorageTest {
                             boolean isDeleteClaim = ((PersistentClaimStorage) volume).isDeleteClaim();
                             assertThat("deleteClaim value did not match for volume : " + volume.toString(),
                                     Annotations.booleanAnnotation(pvc, AbstractModel.ANNO_STRIMZI_IO_DELETE_CLAIM,
-                                            false, AbstractModel.ANNO_CO_STRIMZI_IO_DELETE_CLAIM),
+                                            false),
                                     is(isDeleteClaim));
 
                         }

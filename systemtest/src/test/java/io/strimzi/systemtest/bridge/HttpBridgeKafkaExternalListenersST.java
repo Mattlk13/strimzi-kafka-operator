@@ -6,6 +6,7 @@ package io.strimzi.systemtest.bridge;
 
 import io.fabric8.kubernetes.api.model.Service;
 import io.strimzi.api.kafka.model.CertSecretSource;
+import io.strimzi.api.kafka.model.KafkaBridgeResources;
 import io.strimzi.api.kafka.model.KafkaBridgeSpec;
 import io.strimzi.api.kafka.model.KafkaBridgeSpecBuilder;
 import io.strimzi.api.kafka.model.KafkaResources;
@@ -15,22 +16,24 @@ import io.strimzi.api.kafka.model.listener.KafkaListenerAuthenticationScramSha51
 import io.strimzi.api.kafka.model.listener.KafkaListenerAuthenticationTls;
 import io.strimzi.api.kafka.model.listener.arraylistener.KafkaListenerType;
 import io.strimzi.systemtest.Constants;
+import io.strimzi.systemtest.annotations.IsolatedTest;
 import io.strimzi.systemtest.kafkaclients.externalClients.BasicExternalKafkaClient;
-import io.strimzi.systemtest.resources.KubernetesResource;
-import io.strimzi.systemtest.resources.crd.KafkaBridgeResource;
-import io.strimzi.systemtest.resources.crd.KafkaClientsResource;
-import io.strimzi.systemtest.resources.crd.KafkaResource;
-import io.strimzi.systemtest.resources.crd.KafkaTopicResource;
-import io.strimzi.systemtest.resources.crd.KafkaUserResource;
+import io.strimzi.systemtest.resources.kubernetes.ServiceResource;
+import io.strimzi.systemtest.templates.crd.KafkaBridgeTemplates;
+import io.strimzi.systemtest.templates.crd.KafkaClientsTemplates;
+import io.strimzi.systemtest.templates.crd.KafkaTemplates;
+import io.strimzi.systemtest.templates.crd.KafkaTopicTemplates;
+import io.strimzi.systemtest.templates.crd.KafkaUserTemplates;
 import io.strimzi.systemtest.utils.ClientUtils;
 import io.strimzi.systemtest.utils.kafkaUtils.KafkaBridgeUtils;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.common.security.auth.SecurityProtocol;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtensionContext;
 
-import static io.strimzi.systemtest.Constants.ACCEPTANCE;
 import static io.strimzi.systemtest.Constants.BRIDGE;
 import static io.strimzi.systemtest.Constants.EXTERNAL_CLIENTS_USED;
 import static io.strimzi.systemtest.Constants.NODEPORT_SUPPORTED;
@@ -38,16 +41,19 @@ import static io.strimzi.systemtest.Constants.REGRESSION;
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.MatcherAssert.assertThat;
 
-@Tag(ACCEPTANCE)
 @Tag(REGRESSION)
 @Tag(BRIDGE)
 @Tag(NODEPORT_SUPPORTED)
 @Tag(EXTERNAL_CLIENTS_USED)
 class HttpBridgeKafkaExternalListenersST extends HttpBridgeAbstractST {
-    private static final String BRIDGE_EXTERNAL_SERVICE = CLUSTER_NAME + "-bridge-external-service";
 
-    @Test
-    void testScramShaAuthWithWeirdUsername() {
+    private static final Logger LOGGER = LogManager.getLogger(HttpBridgeKafkaExternalListenersST.class);
+    private static final String BRIDGE_EXTERNAL_SERVICE =  "shared-http-bridge-external-service";
+
+    @IsolatedTest
+    void testScramShaAuthWithWeirdUsername(ExtensionContext extensionContext) {
+        String clusterName = mapWithClusterNames.get(extensionContext.getDisplayName());
+
         // Create weird named user with . and more than 64 chars -> SCRAM-SHA
         String weirdUserName = "jjglmahyijoambryleyxjjglmahy.ijoambryleyxjjglmahyijoambryleyxasd.asdasidioiqweioqiweooioqieioqieoqieooi";
 
@@ -59,7 +65,7 @@ class HttpBridgeKafkaExternalListenersST extends HttpBridgeAbstractST {
         // Initialize CertSecretSource with certificate and secret names for consumer
         CertSecretSource certSecret = new CertSecretSource();
         certSecret.setCertificate("ca.crt");
-        certSecret.setSecretName(KafkaResources.clusterCaCertificateSecretName(CLUSTER_NAME));
+        certSecret.setSecretName(KafkaResources.clusterCaCertificateSecretName(clusterName));
 
         KafkaBridgeSpec bridgeSpec = new KafkaBridgeSpecBuilder()
             .withNewKafkaClientAuthenticationScramSha512()
@@ -71,18 +77,20 @@ class HttpBridgeKafkaExternalListenersST extends HttpBridgeAbstractST {
             .endTls()
             .build();
 
-        testWeirdUsername(weirdUserName, new KafkaListenerAuthenticationScramSha512(), bridgeSpec, SecurityProtocol.SASL_SSL);
+        testWeirdUsername(extensionContext, weirdUserName, new KafkaListenerAuthenticationScramSha512(), bridgeSpec, SecurityProtocol.SASL_SSL);
     }
 
-    @Test
-    void testTlsAuthWithWeirdUsername() {
+    @IsolatedTest
+    void testTlsAuthWithWeirdUsername(ExtensionContext extensionContext) {
+        String clusterName = mapWithClusterNames.get(extensionContext.getDisplayName());
+
         // Create weird named user with . and maximum of 64 chars -> TLS
         String weirdUserName = "jjglmahyijoambryleyxjjglmahy.ijoambryleyxjjglmahyijoambryleyxasd";
 
         // Initialize CertSecretSource with certificate and secret names for consumer
         CertSecretSource certSecret = new CertSecretSource();
         certSecret.setCertificate("ca.crt");
-        certSecret.setSecretName(KafkaResources.clusterCaCertificateSecretName(CLUSTER_NAME));
+        certSecret.setSecretName(KafkaResources.clusterCaCertificateSecretName(clusterName));
 
         KafkaBridgeSpec bridgeSpec = new KafkaBridgeSpecBuilder()
             .withNewKafkaClientAuthenticationTls()
@@ -97,13 +105,15 @@ class HttpBridgeKafkaExternalListenersST extends HttpBridgeAbstractST {
             .endTls()
             .build();
 
-        testWeirdUsername(weirdUserName, new KafkaListenerAuthenticationTls(), bridgeSpec, SecurityProtocol.SSL);
+        testWeirdUsername(extensionContext, weirdUserName, new KafkaListenerAuthenticationTls(), bridgeSpec, SecurityProtocol.SSL);
     }
 
-    private void testWeirdUsername(String weirdUserName, KafkaListenerAuthentication auth, KafkaBridgeSpec spec, SecurityProtocol securityProtocol) {
-        String aliceUser = "alice";
+    private void testWeirdUsername(ExtensionContext extensionContext, String weirdUserName, KafkaListenerAuthentication auth, KafkaBridgeSpec spec, SecurityProtocol securityProtocol) {
+        String aliceUser = mapWithClusterNames.get(extensionContext.getDisplayName());
+        String clusterName = mapWithClusterNames.get(extensionContext.getDisplayName());
+        String topicName = mapWithTestTopics.get(extensionContext.getDisplayName());
 
-        KafkaResource.kafkaEphemeral(CLUSTER_NAME, 3)
+        resourceManager.createResource(extensionContext, KafkaTemplates.kafkaEphemeral(clusterName, 3)
             .editSpec()
                 .editKafka()
                     .withNewListeners()
@@ -123,43 +133,51 @@ class HttpBridgeKafkaExternalListenersST extends HttpBridgeAbstractST {
                         .endGenericKafkaListener()
                     .endListeners()
                 .endKafka()
-                .endSpec()
-            .done();
+            .endSpec().build());
+
+        kafkaBridgeClientJob = kafkaBridgeClientJob.toBuilder()
+            .withBootstrapAddress(KafkaBridgeResources.serviceName(clusterName))
+            .withProducerName(clusterName + "-" + producerName)
+            .withConsumerName(clusterName + "-" + consumerName)
+            .withTopicName(topicName)
+            .build();
 
         // Create topic
-        KafkaTopicResource.topic(CLUSTER_NAME, TOPIC_NAME).done();
+        resourceManager.createResource(extensionContext, KafkaTopicTemplates.topic(clusterName, topicName).build());
 
         // Create user
         if (auth.getType().equals(Constants.TLS_LISTENER_DEFAULT_NAME)) {
-            KafkaUserResource.tlsUser(CLUSTER_NAME, weirdUserName).done();
-            KafkaUserResource.tlsUser(CLUSTER_NAME, aliceUser).done();
+            resourceManager.createResource(extensionContext, KafkaUserTemplates.tlsUser(clusterName, weirdUserName).build());
+            resourceManager.createResource(extensionContext, KafkaUserTemplates.tlsUser(clusterName, aliceUser).build());
         } else {
-            KafkaUserResource.scramShaUser(CLUSTER_NAME, weirdUserName).done();
-            KafkaUserResource.scramShaUser(CLUSTER_NAME, aliceUser).done();
+            resourceManager.createResource(extensionContext, KafkaUserTemplates.scramShaUser(clusterName, weirdUserName).build());
+            resourceManager.createResource(extensionContext, KafkaUserTemplates.scramShaUser(clusterName, aliceUser).build());
         }
 
-        KafkaClientsResource.deployKafkaClients(true, KAFKA_CLIENTS_NAME).done();
+        String kafkaClientsName = mapWithKafkaClientNames.get(extensionContext.getDisplayName());
+
+        resourceManager.createResource(extensionContext, KafkaClientsTemplates.kafkaClients(true, kafkaClientsName).build());
 
         // Deploy http bridge
-        KafkaBridgeResource.kafkaBridge(CLUSTER_NAME, KafkaResources.tlsBootstrapAddress(CLUSTER_NAME), 1)
-            .withNewSpecLike(spec)
-                .withBootstrapServers(KafkaResources.tlsBootstrapAddress(CLUSTER_NAME))
-                .withNewHttp(Constants.HTTP_BRIDGE_DEFAULT_PORT)
+        resourceManager.createResource(extensionContext, KafkaBridgeTemplates.kafkaBridge(clusterName, KafkaResources.tlsBootstrapAddress(clusterName), 1)
+                .withNewSpecLike(spec)
+                    .withBootstrapServers(KafkaResources.tlsBootstrapAddress(clusterName))
+                    .withNewHttp(Constants.HTTP_BRIDGE_DEFAULT_PORT)
                 .withNewConsumer()
                     .addToConfig(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest")
                 .endConsumer()
             .endSpec()
-            .done();
+            .build());
 
-        Service service = KafkaBridgeUtils.createBridgeNodePortService(CLUSTER_NAME, NAMESPACE, BRIDGE_EXTERNAL_SERVICE);
-        KubernetesResource.createServiceResource(service, NAMESPACE).done();
+        Service service = KafkaBridgeUtils.createBridgeNodePortService(clusterName, NAMESPACE, BRIDGE_EXTERNAL_SERVICE);
+        ServiceResource.createServiceResource(extensionContext, service, NAMESPACE);
 
-        kafkaBridgeClientJob.consumerStrimziBridge().done();
+        resourceManager.createResource(extensionContext, kafkaBridgeClientJob.consumerStrimziBridge().build());
 
         BasicExternalKafkaClient basicExternalKafkaClient = new BasicExternalKafkaClient.Builder()
-            .withClusterName(CLUSTER_NAME)
+            .withClusterName(clusterName)
             .withNamespaceName(NAMESPACE)
-            .withTopicName(TOPIC_NAME)
+            .withTopicName(topicName)
             .withMessageCount(MESSAGE_COUNT)
             .withKafkaUsername(weirdUserName)
             .withSecurityProtocol(securityProtocol)
@@ -167,11 +185,13 @@ class HttpBridgeKafkaExternalListenersST extends HttpBridgeAbstractST {
             .build();
 
         assertThat(basicExternalKafkaClient.sendMessagesTls(), is(MESSAGE_COUNT));
-        ClientUtils.waitForClientSuccess(consumerName, NAMESPACE, MESSAGE_COUNT);
+        ClientUtils.waitForClientSuccess(clusterName + "-" + consumerName, NAMESPACE, MESSAGE_COUNT);
     }
 
     @BeforeAll
-    void createClassResources() throws Exception {
-        deployClusterOperator(NAMESPACE);
+    void createClassResources(ExtensionContext extensionContext) {
+        LOGGER.debug("===============================================================");
+        LOGGER.debug("{} - [BEFORE ALL] has been called", this.getClass().getName());
+        installClusterOperator(extensionContext, NAMESPACE);
     }
 }

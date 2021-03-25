@@ -14,6 +14,7 @@ import io.strimzi.api.annotations.DeprecatedProperty;
 import io.strimzi.api.kafka.model.storage.SingleVolumeStorage;
 import io.strimzi.api.kafka.model.template.ZookeeperClusterTemplate;
 import io.strimzi.crdgenerator.annotations.Description;
+import io.strimzi.crdgenerator.annotations.DescriptionFile;
 import io.strimzi.crdgenerator.annotations.KubeLink;
 import io.strimzi.crdgenerator.annotations.Minimum;
 import io.strimzi.crdgenerator.annotations.PresentInVersions;
@@ -28,6 +29,7 @@ import java.util.Map;
 /**
  * Representation of a Strimzi-managed ZooKeeper "cluster".
  */
+@DescriptionFile 
 @Buildable(
         editableEnabled = false,
         builderPackage = Constants.FABRIC8_KUBERNETES_API
@@ -38,9 +40,9 @@ import java.util.Map;
         "affinity", "tolerations",
         "livenessProbe", "readinessProbe",
         "jvmOptions", "resources",
-         "metrics", "logging", "template"})
+         "metrics", "metricsConfig", "logging", "template"})
 @EqualsAndHashCode
-public class ZookeeperClusterSpec implements UnknownPropertyPreserving, Serializable {
+public class ZookeeperClusterSpec implements HasConfigurableMetrics, UnknownPropertyPreserving, Serializable {
 
     private static final long serialVersionUID = 1L;
 
@@ -65,6 +67,7 @@ public class ZookeeperClusterSpec implements UnknownPropertyPreserving, Serializ
     private Probe livenessProbe;
     private Probe readinessProbe;
     private JvmOptions jvmOptions;
+    private MetricsConfig metricsConfig;
     private Map<String, Object> metrics;
     private Affinity affinity;
     private List<Toleration> tolerations;
@@ -102,7 +105,7 @@ public class ZookeeperClusterSpec implements UnknownPropertyPreserving, Serializ
     }
 
     @PresentInVersions("v1alpha1-v1beta1")
-    @DeprecatedProperty
+    @DeprecatedProperty(removalVersion = "v1beta2")
     @Deprecated
     @Description("TLS sidecar configuration. " +
             "The TLS sidecar is not used anymore and this option will be ignored.")
@@ -177,22 +180,39 @@ public class ZookeeperClusterSpec implements UnknownPropertyPreserving, Serializ
         this.jvmOptions = jvmOptions;
     }
 
+    @DeprecatedProperty(movedToPath = "spec.zookeeper.metricsConfig", removalVersion = "v1beta2")
+    @PresentInVersions("v1alpha1-v1beta1")
+    @Deprecated
     @JsonInclude(JsonInclude.Include.NON_EMPTY)
     @Description("The Prometheus JMX Exporter configuration. " +
             "See https://github.com/prometheus/jmx_exporter for details of the structure of this configuration.")
+    @Override
     public Map<String, Object> getMetrics() {
         return metrics;
     }
 
+    @Override
     public void setMetrics(Map<String, Object> metrics) {
         this.metrics = metrics;
+    }
+
+    @Description("Metrics configuration.")
+    @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    @Override
+    public MetricsConfig getMetricsConfig() {
+        return metricsConfig;
+    }
+
+    @Override
+    public void setMetricsConfig(MetricsConfig metricsConfig) {
+        this.metricsConfig = metricsConfig;
     }
 
     @PresentInVersions("v1alpha1-v1beta1")
     @Description("The pod's affinity rules.")
     @KubeLink(group = "core", version = "v1", kind = "affinity")
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    @DeprecatedProperty(movedToPath = "spec.zookeeper.template.pod.affinity")
+    @DeprecatedProperty(movedToPath = "spec.zookeeper.template.pod.affinity", removalVersion = "v1beta2")
     @Deprecated
     public Affinity getAffinity() {
         return affinity;
@@ -206,7 +226,7 @@ public class ZookeeperClusterSpec implements UnknownPropertyPreserving, Serializ
     @Description("The pod's tolerations.")
     @KubeLink(group = "core", version = "v1", kind = "toleration")
     @JsonInclude(JsonInclude.Include.NON_EMPTY)
-    @DeprecatedProperty(movedToPath = "spec.zookeeper.template.pod.tolerations")
+    @DeprecatedProperty(movedToPath = "spec.zookeeper.template.pod.tolerations", removalVersion = "v1beta2")
     @Deprecated
     public List<Toleration> getTolerations() {
         return tolerations;

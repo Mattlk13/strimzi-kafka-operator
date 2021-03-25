@@ -30,7 +30,7 @@ The bootstrap server lists can refer to Kafka clusters that are not deployed in 
 They can also refer to a Kafka cluster not deployed by Strimzi.
 
 If on the same Kubernetes cluster, each list must ideally contain the Kafka cluster bootstrap service which is named `_CLUSTER-NAME_-kafka-bootstrap` and a port number.
-If deployed by Strimzi but on different Kubernetes clusters, the list content depends on the approach used for exposing the clusters (routes, nodeports or loadbalancers).
+If deployed by Strimzi but on different Kubernetes clusters, the list content depends on the approach used for exposing the clusters (routes, ingress, nodeports or loadbalancers).
 
 When using Kafka with a Kafka cluster not managed by Strimzi, you can specify the bootstrap servers list according to the configuration of the given cluster.
 
@@ -64,15 +64,21 @@ Allowed values are `TLSv1.1` and `TLSv1.2`.
 [id='con-common-configuration-trusted-certificates-{context}']
 === `trustedCertificates`
 
-Having xref:type-KafkaClientAuthenticationTls-reference[set `tls` to configure TLS encryption], use the
-`trustedCertificates` property to provide a list of secrets with key names under which the certificates are stored in X.509 format.
+Having set `tls` to configure TLS encryption, use the `trustedCertificates` property to provide a list of secrets with key names under which the certificates are stored in X.509 format.
 
-.An example TLS encryption configuration
+You can use the secrets created by the Cluster Operator for the Kafka cluster,
+or you can create your own TLS certificate file, then create a `Secret` from the file:
+
+[source,shell,subs=+quotes]
+kubectl create secret generic _MY-SECRET_ \
+--from-file=_MY-TLS-CERTIFICATE-FILE.crt_
+
+.Example TLS encryption configuration
 [source,yaml,subs=attributes+]
 ----
 tls:
   trustedCertificates:
-    - secretName: my-cluster-cluster-ca-cert
+    - secretName: my-cluster-cluster-cert
       certificate: ca.crt
     - secretName: my-cluster-cluster-cert
       certificate: ca2.crt
@@ -83,12 +89,14 @@ If certificates are stored in the same secret, it can be listed multiple times.
 If you want to enable TLS, but use the default set of public certification authorities shipped with Java,
 you can specify `trustedCertificates` as an empty array:
 
-.An example of enabling TLS with the default Java certificates
+.Example of enabling TLS with the default Java certificates
 [source,yaml,subs=attributes+]
 ----
 tls:
   trustedCertificates: []
 ----
+
+For information on configuring TLS client authentication, see xref:type-KafkaClientAuthenticationTls-reference[`KafkaClientAuthenticationTls` schema reference].
 
 [id='con-common-configuration-resources-{context}']
 === `resources`
@@ -120,6 +128,17 @@ IMPORTANT: If the resource request is for more than the available free resources
 
 A request may be configured for one or more supported resources.
 
+.Example resource requests configuration
+[source,yaml,subs="attributes+"]
+----
+# ...
+resources:
+  requests:
+    cpu: 12
+    memory: 64Gi
+# ...
+----
+
 *Resource limits*
 
 Limits specify the maximum resources that can be consumed by a given container.
@@ -129,12 +148,35 @@ Resource limits should be always higher than the resource requests.
 
 A resource may be configured for one or more supported limits.
 
+.Example resource limits configuration
+[source,yaml,subs="attributes+"]
+----
+# ...
+resources:
+  limits:
+    cpu: 12
+    memory: 64Gi
+# ...
+----
+
 *Supported CPU formats*
 
 CPU requests and limits are supported in the following formats:
 
 * Number of CPU cores as integer (`5` CPU core) or decimal (`2.5` CPU core).
 * Number or _millicpus_ / _millicores_ (`100m`) where 1000 _millicores_ is the same `1` CPU core.
+
+.Example CPU units
+[source,yaml,subs="attributes+"]
+----
+# ...
+resources:
+  requests:
+    cpu: 500m
+  limits:
+    cpu: 2.5
+# ...
+----
 
 NOTE: The computing power of 1 CPU core may differ depending on the platform where Kubernetes is deployed.
 
@@ -148,6 +190,18 @@ Memory requests and limits are specified in megabytes, gigabytes, mebibytes, and
 * To specify memory in gigabytes, use the `G` suffix. For example `1G`.
 * To specify memory in mebibytes, use the `Mi` suffix. For example `1000Mi`.
 * To specify memory in gibibytes, use the `Gi` suffix. For example `1Gi`.
+
+.Example resources using different memory units
+[source,yaml,subs="attributes+"]
+----
+# ...
+resources:
+  requests:
+    memory: 512Mi
+  limits:
+    memory: 2Gi
+# ...
+----
 
 For more details about memory specification and additional supported units, see {K8sMeaningOfMemory}.
 
@@ -232,9 +286,9 @@ If the `image` name is not defined in the Cluster Operator configuration, then t
 * For Kafka broker initializer:
 . Container image specified in the `STRIMZI_DEFAULT_KAFKA_INIT_IMAGE` environment variable from the Cluster Operator configuration.
 . `{DockerKafkaInit}` container image.
-* For Kafka broker initializer:
+* For Kafka jmxTrans:
 . Container image specified in the `STRIMZI_DEFAULT_JMXTRANS_IMAGE` environment variable from the Cluster Operator configuration.
-. `{DockerKafkaInit}` container image.
+. `{DockerJmxtrans}` container image.
 
 .Example of container image configuration
 [source,yaml,subs=attributes+]
@@ -270,7 +324,7 @@ Both `livenessProbe` and `readinessProbe` support the following options:
 * `successThreshold`
 * `failureThreshold`
 
-.An example of liveness and readiness probe configuration
+.Example of liveness and readiness probe configuration
 [source,yaml,subs="attributes+"]
 ----
 # ...
@@ -286,25 +340,77 @@ livenessProbe:
 For more information about the `livenessProbe` and `readinessProbe` options, see xref:type-Probe-reference[Probe schema reference].
 
 [id='con-common-configuration-prometheus-{context}']
-=== `metrics`
+=== `metricsConfig`
 
-Use the `metrics` property to enable and configure Prometheus metrics.
+Use the `metricsConfig` property to enable and configure Prometheus metrics.
 
-The `metrics` property can also contain additional configuration for the link:https://github.com/prometheus/jmx_exporter[Prometheus JMX exporter^].
+The `metricsConfig` property contains a reference to a ConfigMap containing additional configuration for the link:https://github.com/prometheus/jmx_exporter[Prometheus JMX exporter^].
 Strimzi supports Prometheus metrics using Prometheus JMX exporter to convert the JMX metrics supported by Apache Kafka and ZooKeeper to Prometheus metrics.
 
-To enable Prometheus metrics export without any further configuration, you can set it to an empty object (`{}`).
+To enable Prometheus metrics export without further configuration, you can reference a ConfigMap containing an empty file under `metricsConfig.valueFrom.configMapKeyRef.key`.
+When referencing an empty file, all metrics are exposed as long as they have not been renamed.
+
+.Example ConfigMap with metrics configuration for Kafka
+[source,yaml,subs="+attributes"]
+----
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: my-configmap
+data:
+  my-key: |
+    lowercaseOutputName: true
+    rules:
+    # Special cases and very specific rules
+    - pattern: kafka.server<type=(.+), name=(.+), clientId=(.+), topic=(.+), partition=(.*)><>Value
+      name: kafka_server_$1_$2
+      type: GAUGE
+      labels:
+       clientId: "$3"
+       topic: "$4"
+       partition: "$5"
+    # further configuration
+----
+
+.Example metrics configuration for Kafka
+[source,yaml,subs="+attributes"]
+----
+apiVersion: {KafkaApiVersion}
+kind: Kafka
+metadata:
+  name: my-cluster
+spec:
+  kafka:
+    # ...
+    metricsConfig:
+      type: jmxPrometheusExporter
+      valueFrom:
+        configMapKeyRef:
+          name: my-config-map
+          key: my-key
+    # ...
+  zookeeper:
+    # ...
+----
 
 When metrics are enabled, they are exposed on port 9404.
 
-When the `metrics` property is not defined in the resource, the Prometheus metrics are disabled.
+When the `metricsConfig` (or deprecated `metrics`) property is not defined in the resource, the Prometheus metrics are disabled.
 
-For more information about setting up and deploying Prometheus and Grafana, see link:{BookURLDeploying}#assembly-metrics-setup-str[Introducing Metrics to Kafka] in the _Deploying Strimzi_ guide.
+For more information about setting up and deploying Prometheus and Grafana, see link:{BookURLDeploying}#assembly-metrics-setup-str[Introducing Metrics to Kafka] in the _Deploying and Upgrading Strimzi_ guide.
 
 [id='con-common-configuration-jvm-{context}']
 === `jvmOptions`
 
-JVM options can be configured using the `jvmOptions` property in following resources:
+The following Strimzi components run inside a Java Virtual Machine (JVM):
+
+* Apache Kafka
+* Apache ZooKeeper
+* Apache Kafka Connect
+* Apache Kafka MirrorMaker
+* Strimzi Kafka Bridge
+
+To optimize their performance on different platforms and architectures, you configure the `jvmOptions` property in the following resources:
 
 * `Kafka.spec.kafka`
 * `Kafka.spec.zookeeper`
@@ -314,40 +420,44 @@ JVM options can be configured using the `jvmOptions` property in following resou
 * `KafkaMirrorMaker2.spec`
 * `KafkaBridge.spec`
 
-Only the following JVM options are supported:
+You can specify the following options in your configuration:
 
-`-Xms`:: Configures the minimum initial allocation heap size when the JVM starts.
-`-Xmx`:: Configures the maximum heap size.
+`-Xms`:: Minimum initial allocation heap size when the JVM starts.
+`-Xmx`:: Maximum heap size.
+`-XX`:: Advanced runtime options for the JVM.
+`javaSystemProperties`:: Additional system properties.
+`gcLoggingEnabled`:: xref:con-common-configuration-garbage-collection-{context}[Enables garbage collector logging].
 
-NOTE: The units accepted by JVM settings such as `-Xmx` and `-Xms` are those accepted by the JDK `java` binary in the corresponding image.
-Accordingly, `1g` or `1G` means 1,073,741,824 bytes, and `Gi` is not a valid unit suffix.
-This is in contrast to the units used for xref:con-common-configuration-resources-reference[memory requests and limits], which follow the Kubernetes convention where `1G` means 1,000,000,000 bytes, and `1Gi` means 1,073,741,824 bytes
+The full schema of `jvmOptions` is described in xref:type-JvmOptions-reference[`JvmOptions` schema reference].
 
-The default values used for `-Xms` and `-Xmx` depends on whether there is a xref:con-common-configuration-resources-reference[memory request] limit configured for the container.
+NOTE: The units accepted by JVM settings, such as `-Xmx` and `-Xms`, are the same units accepted by the JDK `java` binary in the corresponding image.
+Therefore, `1g` or `1G` means 1,073,741,824 bytes, and `Gi` is not a valid unit suffix.
+This is different from the units used for xref:con-common-configuration-resources-reference[memory requests and limits], which follow the Kubernetes convention where `1G` means 1,000,000,000 bytes, and `1Gi` means 1,073,741,824 bytes
+
+.`-Xms` and `-Xmx` options
+
+The default values used for `-Xms` and `-Xmx` depend on whether there is a xref:con-common-configuration-resources-reference[memory request] limit configured for the container.
 
 * If there is a memory limit, the JVM's minimum and maximum memory is set to a value corresponding to the limit.
-* If there is no memory limit, the JVM's minimum memory is set to `128M`. The JVM's maximum memory is not defined to allow the memory to grow as needed, which is ideal for single node environments in test and development.
+* If there is no memory limit, the JVM's minimum memory is set to `128M`. The JVM's maximum memory is not defined to allow the memory to increase as needed. This is ideal for single node environments in test and development.
 
-[IMPORTANT]
-====
-Setting `-Xmx` explicitly requires some care:
+Before setting `-Xmx` explicitly consider the following:
 
 * The JVM's overall memory usage will be approximately 4 × the maximum heap, as configured by `-Xmx`.
-* If `-Xmx` is set without also setting an appropriate Kubernetes memory limit, it is possible that the container will be killed should the Kubernetes node experience memory pressure (from other Pods running on it).
+* If `-Xmx` is set without also setting an appropriate Kubernetes memory limit, it is possible that the container will be killed should the Kubernetes node experience memory pressure from other Pods running on it.
 * If `-Xmx` is set without also setting an appropriate Kubernetes memory request, it is possible that the container will be scheduled to a node with insufficient memory.
-In this case, the container will not start but crash (immediately if `-Xms` is set to `-Xmx`, or some later time if not).
-====
+In this case, the container will not start but crash immediately if `-Xms` is set to `-Xmx`, or at a later time if not.
 
-When setting `-Xmx` explicitly, it is recommended to:
+It is _recommended_ to:
 
 * Set the memory request and the memory limit to the same value
 * Use a memory request that is at least 4.5 × the `-Xmx`
 * Consider setting `-Xms` to the same value as `-Xmx`
 
-IMPORTANT: Containers doing lots of disk I/O (such as Kafka broker containers) will need to leave some memory available for use as an operating system page cache.
-On such containers, the requested memory should be significantly higher than the memory used by the JVM.
+In this example, the JVM uses 2 GiB (=2,147,483,648 bytes) for its heap.
+Its total memory usage is approximately 8GiB.
 
-.Example fragment configuring `-Xmx` and `-Xms`
+.Example `-Xmx` and `-Xms` configuration
 [source,yaml,subs=attributes+]
 ----
 # ...
@@ -357,34 +467,16 @@ jvmOptions:
 # ...
 ----
 
-In the above example, the JVM will use 2 GiB (=2,147,483,648 bytes) for its heap.
-Its total memory usage will be approximately 8GiB.
-
 Setting the same value for initial (`-Xms`) and maximum (`-Xmx`) heap sizes avoids the JVM having to allocate memory after startup, at the cost of possibly allocating more heap than is really needed.
-For Kafka and ZooKeeper pods such allocation could cause unwanted latency.
-For Kafka Connect avoiding over allocation may be the most important concern, especially in distributed mode where the effects of over-allocation is multiplied by the number of consumers.
 
-*-server*
+IMPORTANT: Containers performing lots of disk I/O, such as Kafka broker containers, require available memory for use as an operating system page cache.
+On such containers, the requested memory should be significantly higher than the memory used by the JVM.
 
-`-server` enables the server JVM. This option can be set to true or false.
+.-XX option
 
-.Example fragment configuring `-server`
-[source,yaml,subs=attributes+]
-----
-# ...
-jvmOptions:
-  "-server": true
-# ...
-----
+`-XX` options are used to configure the `KAFKA_JVM_PERFORMANCE_OPTS` option of Apache Kafka.
 
-NOTE: When neither of the two options (`-server` and `-XX`) are specified, the default Apache Kafka configuration of `KAFKA_JVM_PERFORMANCE_OPTS` is used.
-
-*-XX*
-
-`-XX` object can be used for configuring advanced runtime options of a JVM.
-The `-server` and `-XX` options are used to configure the `KAFKA_JVM_PERFORMANCE_OPTS` option of Apache Kafka.
-
-.Example showing the use of the `-XX` object
+.Example `-XX` configuration
 [source,yaml,subs=attributes+]
 ----
 jvmOptions:
@@ -395,14 +487,27 @@ jvmOptions:
     "ExplicitGCInvokesConcurrent": true
 ----
 
-The example configuration above will result in the following JVM options:
-
+.JVM options resulting from the `-XX` configuration
 [source]
 ----
 -XX:+UseG1GC -XX:MaxGCPauseMillis=20 -XX:InitiatingHeapOccupancyPercent=35 -XX:+ExplicitGCInvokesConcurrent -XX:-UseParNewGC
 ----
 
-NOTE: When neither of the two options (`-server` and `-XX`) are specified, the default Apache Kafka configuration of `KAFKA_JVM_PERFORMANCE_OPTS` is used.
+NOTE: When no `-XX` options are specified, the default Apache Kafka configuration of `KAFKA_JVM_PERFORMANCE_OPTS` is used.
+
+.`javaSystemProperties`
+
+`javaSystemProperties` are used to configure additional Java system properties, such as debugging utilities.
+
+.Example `javaSystemProperties` configuration
+[source,yaml,subs=attributes+]
+----
+jvmOptions:
+  javaSystemProperties:
+    - name: javax.net.debug
+      value: ssl
+----
+
 
 [id='con-common-configuration-garbage-collection-{context}']
 === Garbage collector logging
@@ -411,7 +516,7 @@ The `jvmOptions` property also allows you to enable and disable garbage collecto
 GC logging is disabled by default.
 To enable it, set the `gcLoggingEnabled` property as follows:
 
-.Example of enabling GC logging
+.Example GC logging configuration
 [source,yaml,subs=attributes+]
 ----
 # ...

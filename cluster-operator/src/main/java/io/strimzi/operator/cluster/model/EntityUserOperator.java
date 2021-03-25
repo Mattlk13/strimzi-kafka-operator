@@ -12,7 +12,6 @@ import io.fabric8.kubernetes.api.model.SecurityContext;
 import io.fabric8.kubernetes.api.model.Volume;
 import io.fabric8.kubernetes.api.model.VolumeMount;
 import io.fabric8.kubernetes.api.model.rbac.RoleBinding;
-import io.fabric8.kubernetes.api.model.rbac.RoleBindingBuilder;
 import io.fabric8.kubernetes.api.model.rbac.RoleRef;
 import io.fabric8.kubernetes.api.model.rbac.RoleRefBuilder;
 import io.fabric8.kubernetes.api.model.rbac.Subject;
@@ -28,6 +27,7 @@ import io.strimzi.operator.cluster.ClusterOperatorConfig;
 import io.strimzi.operator.common.model.OrderedProperties;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 import static java.util.Arrays.asList;
@@ -61,13 +61,19 @@ public class EntityUserOperator extends AbstractModel {
     public static final String ENV_VAR_CLIENTS_CA_RENEWAL = "STRIMZI_CA_RENEWAL";
     public static final String ENV_VAR_CLUSTER_CA_CERT_SECRET_NAME = "STRIMZI_CLUSTER_CA_CERT_SECRET_NAME";
     public static final String ENV_VAR_EO_KEY_SECRET_NAME = "STRIMZI_EO_KEY_SECRET_NAME";
+    public static final String ENV_VAR_SECRET_PREFIX = "STRIMZI_SECRET_PREFIX";
     public static final Probe DEFAULT_HEALTHCHECK_OPTIONS = new ProbeBuilder().withTimeoutSeconds(EntityUserOperatorSpec.DEFAULT_HEALTHCHECK_TIMEOUT)
             .withInitialDelaySeconds(EntityUserOperatorSpec.DEFAULT_HEALTHCHECK_DELAY).build();
+
+    // Volume name of the temporary volume used by the UO container
+    // Because the container shares the pod with other containers, it needs to have unique name
+    /*test*/ static final String USER_OPERATOR_TMP_DIRECTORY_DEFAULT_VOLUME_NAME = "strimzi-uo-tmp";
 
     private String kafkaBootstrapServers;
     private String zookeeperConnect;
     private String watchedNamespace;
     private String resourceLabels;
+    private String secretPrefix;
     private long reconciliationIntervalMs;
     private long zookeeperSessionTimeoutMs;
     private int clientsCaValidityDays;
@@ -92,6 +98,7 @@ public class EntityUserOperator extends AbstractModel {
         this.watchedNamespace = namespace;
         this.reconciliationIntervalMs = EntityUserOperatorSpec.DEFAULT_FULL_RECONCILIATION_INTERVAL_SECONDS * 1_000;
         this.zookeeperSessionTimeoutMs = EntityUserOperatorSpec.DEFAULT_ZOOKEEPER_SESSION_TIMEOUT_SECONDS * 1_000;
+        this.secretPrefix = EntityUserOperatorSpec.DEFAULT_SECRET_PREFIX;
         this.resourceLabels = ModelUtils.defaultResourceLabels(cluster);
 
         this.ancillaryConfigMapName = metricAndLogConfigsName(cluster);
@@ -161,6 +168,14 @@ public class EntityUserOperator extends AbstractModel {
         return kafkaBootstrapServers;
     }
 
+    public String getSecretPrefix() {
+        return secretPrefix;
+    }
+
+    public void setSecretPrefix(String secretPrefix) {
+        this.secretPrefix = secretPrefix;
+    }
+
     protected static String defaultBootstrapServers(String cluster) {
         return KafkaCluster.serviceName(cluster) + ":" + EntityUserOperatorSpec.DEFAULT_BOOTSTRAP_SERVERS_PORT;
     }
@@ -178,8 +193,8 @@ public class EntityUserOperator extends AbstractModel {
      * @param cluster The cluster name.
      * @return The name of the role binding.
      */
-    public static String roleBindingName(String cluster) {
-        return "strimzi-" + cluster + "-entity-user-operator";
+    public static String roleBindingForRoleName(String cluster) {
+        return cluster + "-entity-user-operator-role";
     }
 
     @Override
@@ -212,7 +227,7 @@ public class EntityUserOperator extends AbstractModel {
                 result.setOwnerReference(kafkaAssembly);
                 String image = userOperatorSpec.getImage();
                 if (image == null) {
-                    image = System.getenv().getOrDefault(ClusterOperatorConfig.STRIMZI_DEFAULT_USER_OPERATOR_IMAGE, "strimzi/operator:latest");
+                    image = System.getenv().getOrDefault(ClusterOperatorConfig.STRIMZI_DEFAULT_USER_OPERATOR_IMAGE, "quay.io/strimzi/operator:latest");
                 }
                 result.setImage(image);
                 result.setWatchedNamespace(userOperatorSpec.getWatchedNamespace() != null ? userOperatorSpec.getWatchedNamespace() : namespace);
@@ -220,6 +235,7 @@ public class EntityUserOperator extends AbstractModel {
                 result.setZookeeperSessionTimeoutMs(userOperatorSpec.getZookeeperSessionTimeoutSeconds() * 1_000);
                 result.setLogging(userOperatorSpec.getLogging());
                 result.setGcLoggingEnabled(userOperatorSpec.getJvmOptions() == null ? DEFAULT_JVM_GC_LOGGING_ENABLED : userOperatorSpec.getJvmOptions().isGcLoggingEnabled());
+                result.setSecretPrefix(userOperatorSpec.getSecretPrefix() == null ? EntityUserOperatorSpec.DEFAULT_SECRET_PREFIX : userOperatorSpec.getSecretPrefix());
                 if (userOperatorSpec.getJvmOptions() != null) {
                     result.setJavaSystemProperties(userOperatorSpec.getJvmOptions().getJavaSystemProperties());
                 }
@@ -281,6 +297,7 @@ public class EntityUserOperator extends AbstractModel {
         varList.add(buildEnvVar(ENV_VAR_CLUSTER_CA_CERT_SECRET_NAME, KafkaCluster.clusterCaCertSecretName(cluster)));
         varList.add(buildEnvVar(ENV_VAR_EO_KEY_SECRET_NAME, EntityOperator.secretName(cluster)));
         varList.add(buildEnvVar(ENV_VAR_STRIMZI_GC_LOG_ENABLED, String.valueOf(gcLoggingEnabled)));
+        varList.add(buildEnvVar(ENV_VAR_SECRET_PREFIX, secretPrefix));
         EntityOperator.javaOptions(varList, getJvmOptions(), javaSystemProperties);
 
         // Add shared environment variables used for all containers
@@ -292,16 +309,23 @@ public class EntityUserOperator extends AbstractModel {
     }
 
     public List<Volume> getVolumes() {
-        return singletonList(VolumeUtils.createConfigMapVolume(logAndMetricsConfigVolumeName, ancillaryConfigMapName));
+        return asList(createTempDirVolume(USER_OPERATOR_TMP_DIRECTORY_DEFAULT_VOLUME_NAME),
+                VolumeUtils.createConfigMapVolume(logAndMetricsConfigVolumeName, ancillaryConfigMapName));
     }
 
     private List<VolumeMount> getVolumeMounts() {
-        return asList(VolumeUtils.createVolumeMount(logAndMetricsConfigVolumeName, logAndMetricsConfigMountPath),
+        return asList(createTempDirVolumeMount(USER_OPERATOR_TMP_DIRECTORY_DEFAULT_VOLUME_NAME),
+                VolumeUtils.createVolumeMount(logAndMetricsConfigVolumeName, logAndMetricsConfigMountPath),
                 VolumeUtils.createVolumeMount(EntityOperator.TLS_SIDECAR_EO_CERTS_VOLUME_NAME, EntityOperator.TLS_SIDECAR_EO_CERTS_VOLUME_MOUNT),
                 VolumeUtils.createVolumeMount(EntityOperator.TLS_SIDECAR_CA_CERTS_VOLUME_NAME, EntityOperator.TLS_SIDECAR_CA_CERTS_VOLUME_MOUNT));
     }
 
-    public RoleBinding generateRoleBinding(String namespace, String watchedNamespace) {
+    @Override
+    protected String getRoleName() {
+        return EntityOperator.getRoleName(cluster);
+    }
+
+    public RoleBinding generateRoleBindingForRole(String namespace, String watchedNamespace) {
         Subject ks = new SubjectBuilder()
                 .withKind("ServiceAccount")
                 .withName(EntityOperator.entityOperatorServiceAccountName(cluster))
@@ -309,21 +333,22 @@ public class EntityUserOperator extends AbstractModel {
                 .build();
 
         RoleRef roleRef = new RoleRefBuilder()
-                .withName(EntityOperator.EO_CLUSTER_ROLE_NAME)
+                .withName(getRoleName())
                 .withApiGroup("rbac.authorization.k8s.io")
-                .withKind("ClusterRole")
+                .withKind("Role")
                 .build();
 
-        RoleBinding rb = new RoleBindingBuilder()
-                .withNewMetadata()
-                    .withName(roleBindingName(cluster))
-                    .withNamespace(watchedNamespace)
-                    .withOwnerReferences(createOwnerReference())
-                    .withLabels(labels.toMap())
-                .endMetadata()
-                .withRoleRef(roleRef)
-                .withSubjects(singletonList(ks))
-                .build();
+        RoleBinding rb = generateRoleBinding(
+                roleBindingForRoleName(cluster),
+                watchedNamespace,
+                roleRef,
+                singletonList(ks)
+        );
+
+        // We set OwnerReference only within the same namespace since it does not work cross-namespace
+        if (!namespace.equals(watchedNamespace)) {
+            rb.getMetadata().setOwnerReferences(Collections.emptyList());
+        }
 
         return rb;
     }

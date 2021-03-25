@@ -41,7 +41,10 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
  * test them against real clusters.
  */
 @ExtendWith(VertxExtension.class)
-public abstract class AbstractResourceOperatorIT<C extends KubernetesClient, T extends HasMetadata, L extends KubernetesResourceList/*<T>*/, D, R extends Resource<T, D>> {
+public abstract class AbstractResourceOperatorIT<C extends KubernetesClient,
+        T extends HasMetadata,
+        L extends KubernetesResourceList<T>,
+        R extends Resource<T>> {
     protected static final Logger log = LogManager.getLogger(AbstractResourceOperatorIT.class);
     public static final String RESOURCE_NAME = "my-test-resource";
     protected String resourceName;
@@ -86,7 +89,7 @@ public abstract class AbstractResourceOperatorIT<C extends KubernetesClient, T e
         }
     }
 
-    abstract AbstractResourceOperator<C, T, L, D, R> operator();
+    abstract AbstractResourceOperator<C, T, L, R> operator();
     abstract T getOriginal();
     abstract T getModified();
     abstract void assertResources(VertxTestContext context, T expected, T actual);
@@ -94,7 +97,7 @@ public abstract class AbstractResourceOperatorIT<C extends KubernetesClient, T e
     @Test
     public void testCreateModifyDelete(VertxTestContext context)    {
         Checkpoint async = context.checkpoint();
-        AbstractResourceOperator<C, T, L, D, R> op = operator();
+        AbstractResourceOperator<C, T, L, R> op = operator();
 
         T newResource = getOriginal();
         T modResource = getModified();

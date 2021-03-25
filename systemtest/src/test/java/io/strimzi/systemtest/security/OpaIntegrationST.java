@@ -9,14 +9,13 @@ import io.strimzi.api.kafka.model.listener.KafkaListenerAuthenticationTls;
 import io.strimzi.api.kafka.model.listener.arraylistener.KafkaListenerType;
 import io.strimzi.systemtest.AbstractST;
 import io.strimzi.systemtest.Constants;
+import io.strimzi.systemtest.annotations.ParallelTest;
 import io.strimzi.systemtest.kafkaclients.internalClients.InternalKafkaClient;
-import io.strimzi.systemtest.resources.ResourceManager;
-import io.strimzi.systemtest.resources.crd.KafkaClientsResource;
-import io.strimzi.systemtest.resources.crd.KafkaResource;
-import io.strimzi.systemtest.resources.crd.KafkaTopicResource;
-import io.strimzi.systemtest.resources.crd.KafkaUserResource;
+import io.strimzi.systemtest.templates.crd.KafkaClientsTemplates;
+import io.strimzi.systemtest.templates.crd.KafkaTemplates;
+import io.strimzi.systemtest.templates.crd.KafkaTopicTemplates;
+import io.strimzi.systemtest.templates.crd.KafkaUserTemplates;
 import io.strimzi.systemtest.utils.FileUtils;
-import io.strimzi.systemtest.utils.kafkaUtils.KafkaTopicUtils;
 import io.strimzi.test.TestUtils;
 import org.apache.kafka.common.security.auth.SecurityProtocol;
 import org.apache.logging.log4j.LogManager;
@@ -24,7 +23,7 @@ import org.apache.logging.log4j.Logger;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtensionContext;
 
 import java.io.IOException;
 
@@ -43,18 +42,31 @@ public class OpaIntegrationST extends AbstractST {
     private static final String OPA_SUPERUSER = "arnost";
     private static final String OPA_GOOD_USER = "good-user";
     private static final String OPA_BAD_USER = "bad-user";
-    private static final String TOPIC_NAME = KafkaTopicUtils.generateRandomNameOfTopic();
     private static String clientsPodName = "";
+    private static final String CLUSTER_NAME = "opa-cluster";
 
-    @Test
-    void testOpaAuthorization() {
+    @ParallelTest
+    void testOpaAuthorization(ExtensionContext extensionContext) {
+        String clusterName = mapWithClusterNames.get(extensionContext.getDisplayName());
+        String topicName = mapWithTestTopics.get(extensionContext.getDisplayName());
         final String consumerGroupName = "consumer-group-name-1";
+        final String kafkaClientsDeploymentName = clusterName + "-" + Constants.KAFKA_CLIENTS;
+        // Deploy client pod with custom certificates and collect messages from internal TLS listener
 
-        LOGGER.info("Checking KafkaUser {} that is able to send and receive messages to/from topic '{}'", OPA_GOOD_USER, TOPIC_NAME);
+        KafkaUser goodUser = KafkaUserTemplates.tlsUser(CLUSTER_NAME, OPA_GOOD_USER).build();
+        KafkaUser badUser = KafkaUserTemplates.tlsUser(CLUSTER_NAME, OPA_BAD_USER).build();
+
+        resourceManager.createResource(extensionContext, goodUser);
+        resourceManager.createResource(extensionContext, badUser);
+        resourceManager.createResource(extensionContext, KafkaClientsTemplates.kafkaClients(true, kafkaClientsDeploymentName, false, goodUser, badUser).build());
+
+        String clientsPodName = kubeClient().listPodsByPrefixInName(kafkaClientsDeploymentName).get(0).getMetadata().getName();
+
+        LOGGER.info("Checking KafkaUser {} that is able to send and receive messages to/from topic '{}'", OPA_GOOD_USER, topicName);
 
         // Setup kafka client
         InternalKafkaClient internalKafkaClient = new InternalKafkaClient.Builder()
-            .withTopicName(TOPIC_NAME)
+            .withTopicName(topicName)
             .withNamespaceName(NAMESPACE)
             .withClusterName(CLUSTER_NAME)
             .withKafkaUsername(OPA_GOOD_USER)
@@ -70,7 +82,7 @@ public class OpaIntegrationST extends AbstractST {
             internalKafkaClient.receiveMessagesTls()
         );
 
-        LOGGER.info("Checking KafkaUser {} that is not able to send or receive messages to/from topic '{}'", OPA_BAD_USER, TOPIC_NAME);
+        LOGGER.info("Checking KafkaUser {} that is not able to send or receive messages to/from topic '{}'", OPA_BAD_USER, topicName);
 
         internalKafkaClient = internalKafkaClient.toBuilder()
             .withKafkaUsername(OPA_BAD_USER)
@@ -80,15 +92,28 @@ public class OpaIntegrationST extends AbstractST {
         assertThat(internalKafkaClient.receiveMessagesTls(), is(0));
     }
 
-    @Test
-    void testOpaAuthorizationSuperUser() {
-        final String consumerGroupName = "consumer-group-name-1";
+    @ParallelTest
+    void testOpaAuthorizationSuperUser(ExtensionContext extensionContext) {
+        String clusterName = mapWithClusterNames.get(extensionContext.getDisplayName());
+        String topicName = mapWithTestTopics.get(extensionContext.getDisplayName());
+        final String consumerGroupName = "consumer-group-name-2";
+        final String kafkaClientsDeploymentName = clusterName + "-" + Constants.KAFKA_CLIENTS;
 
-        LOGGER.info("Checking KafkaUser {} that is able to send and receive messages to/from topic '{}'", OPA_GOOD_USER, TOPIC_NAME);
+        KafkaUser superuser = KafkaUserTemplates.tlsUser(CLUSTER_NAME, OPA_SUPERUSER).build();
+
+        resourceManager.createResource(extensionContext, KafkaTopicTemplates.topic(CLUSTER_NAME, topicName).build());
+        resourceManager.createResource(extensionContext, superuser);
+        resourceManager.createResource(extensionContext, KafkaClientsTemplates.kafkaClients(true, kafkaClientsDeploymentName, false, superuser).build());
+
+        // Deploy client pod with custom certificates and collect messages from internal TLS listener
+        String clientsPodName = kubeClient().listPodsByPrefixInName(kafkaClientsDeploymentName).get(0).getMetadata().getName();
+
+
+        LOGGER.info("Checking KafkaUser {} that is able to send and receive messages to/from topic '{}'", OPA_GOOD_USER, topicName);
 
         // Setup kafka client
         InternalKafkaClient internalKafkaClient = new InternalKafkaClient.Builder()
-            .withTopicName(TOPIC_NAME)
+            .withTopicName(topicName)
             .withNamespaceName(NAMESPACE)
             .withClusterName(CLUSTER_NAME)
             .withKafkaUsername(OPA_SUPERUSER)
@@ -106,14 +131,13 @@ public class OpaIntegrationST extends AbstractST {
     }
 
     @BeforeAll
-    void setup() throws Exception {
-        ResourceManager.setClassResources();
-        installClusterOperator(NAMESPACE, Constants.CO_OPERATION_TIMEOUT_DEFAULT);
+    void setup(ExtensionContext extensionContext) throws Exception {
+        installClusterOperator(extensionContext, NAMESPACE, Constants.CO_OPERATION_TIMEOUT_DEFAULT);
 
         // Install OPA
         cmdKubeClient().apply(FileUtils.updateNamespaceOfYamlFile(TestUtils.USER_PATH + "/../systemtest/src/test/resources/opa/opa.yaml", NAMESPACE));
 
-        KafkaResource.kafkaEphemeral(CLUSTER_NAME,  3, 1)
+        resourceManager.createResource(extensionContext, KafkaTemplates.kafkaEphemeral(CLUSTER_NAME, 3, 1)
             .editSpec()
                 .editKafka()
                     .withNewKafkaAuthorizationOpa()
@@ -131,17 +155,7 @@ public class OpaIntegrationST extends AbstractST {
                     .endListeners()
                 .endKafka()
             .endSpec()
-            .done();
-
-        KafkaTopicResource.topic(CLUSTER_NAME, TOPIC_NAME).done();
-        KafkaUser goodUser = KafkaUserResource.tlsUser(CLUSTER_NAME, OPA_GOOD_USER).done();
-        KafkaUser badUser = KafkaUserResource.tlsUser(CLUSTER_NAME, OPA_BAD_USER).done();
-        KafkaUser superuser = KafkaUserResource.tlsUser(CLUSTER_NAME, OPA_SUPERUSER).done();
-
-        final String kafkaClientsDeploymentName = CLUSTER_NAME + "-" + Constants.KAFKA_CLIENTS;
-        // Deploy client pod with custom certificates and collect messages from internal TLS listener
-        KafkaClientsResource.deployKafkaClients(true, kafkaClientsDeploymentName, false, goodUser, badUser, superuser).done();
-        clientsPodName = kubeClient().listPodsByPrefixInName(kafkaClientsDeploymentName).get(0).getMetadata().getName();
+            .build());
     }
 
     @AfterAll

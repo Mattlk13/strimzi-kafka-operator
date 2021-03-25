@@ -22,7 +22,6 @@ import io.fabric8.kubernetes.client.dsl.Resource;
 import io.fabric8.kubernetes.client.dsl.base.CustomResourceDefinitionContext;
 import io.strimzi.api.kafka.Crds;
 import io.strimzi.api.kafka.KafkaList;
-import io.strimzi.api.kafka.model.DoneableKafka;
 import io.strimzi.api.kafka.model.Kafka;
 import io.strimzi.api.kafka.model.KafkaBuilder;
 import io.strimzi.api.kafka.model.listener.arraylistener.KafkaListenerType;
@@ -40,6 +39,7 @@ import io.strimzi.operator.cluster.ResourceUtils;
 import io.strimzi.operator.cluster.model.AbstractModel;
 import io.strimzi.operator.cluster.model.Ca;
 import io.strimzi.operator.cluster.model.KafkaCluster;
+import io.strimzi.operator.cluster.model.KafkaConfiguration;
 import io.strimzi.operator.cluster.model.KafkaVersion;
 import io.strimzi.operator.cluster.model.ZookeeperCluster;
 import io.strimzi.operator.cluster.operator.resource.ResourceOperatorSupplier;
@@ -98,7 +98,7 @@ public class KafkaAssemblyOperatorMockTest {
     private static final KafkaVersion.Lookup VERSIONS = KafkaVersionTestUtils.getKafkaVersionLookup();
     private static Vertx vertx;
 
-    private final KubernetesVersion kubernetesVersion = KubernetesVersion.V1_9;
+    private final KubernetesVersion kubernetesVersion = KubernetesVersion.V1_16;
 
     private int zkReplicas;
     private SingleVolumeStorage zkStorage;
@@ -273,7 +273,7 @@ public class KafkaAssemblyOperatorMockTest {
         CustomResourceDefinition kafkaAssemblyCrd = Crds.kafka();
 
         client = new MockKube()
-                .withCustomResourceDefinition(kafkaAssemblyCrd, Kafka.class, KafkaList.class, DoneableKafka.class)
+                .withCustomResourceDefinition(kafkaAssemblyCrd, Kafka.class, KafkaList.class)
                     .withInitialInstances(Collections.singleton(cluster))
                 .end()
                 .build();
@@ -349,7 +349,7 @@ public class KafkaAssemblyOperatorMockTest {
             .compose(v -> operator.reconcile(new Reconciliation("test-trigger", Kafka.RESOURCE_KIND, NAMESPACE, CLUSTER_NAME)))
             .onComplete(context.succeeding(v -> async.flag()));
     }
-    
+
     @ParameterizedTest
     @MethodSource("data")
     public void testReconcileReplacesAllDeletedSecrets(Params params, VertxTestContext context) {
@@ -509,9 +509,9 @@ public class KafkaAssemblyOperatorMockTest {
             })));
     }
 
-    private Resource<Kafka, DoneableKafka> kafkaAssembly(String namespace, String name) {
-        CustomResourceDefinition crd = client.customResourceDefinitions().withName(Kafka.CRD_NAME).get();
-        return client.customResources(CustomResourceDefinitionContext.fromCrd(crd), Kafka.class, KafkaList.class, DoneableKafka.class)
+    private Resource<Kafka> kafkaAssembly(String namespace, String name) {
+        CustomResourceDefinition crd = client.apiextensions().v1beta1().customResourceDefinitions().withName(Kafka.CRD_NAME).get();
+        return client.customResources(CustomResourceDefinitionContext.fromCrd(crd), Kafka.class, KafkaList.class)
                 .inNamespace(namespace).withName(name);
     }
 
@@ -801,37 +801,20 @@ public class KafkaAssemblyOperatorMockTest {
             .onComplete(v -> async.flag());
     }
 
-
     /** Test the ZK version change functions */
     private void reconcileZkVersionChange(VertxTestContext context, String initialKafkaVersion, String changedKafkaVersion, String changedImage) {
+        // We set the versions in the initial cluster to allow downgrades / upgrades
+        KafkaVersion lowerVersion = KafkaVersion.compareDottedVersions(initialKafkaVersion, changedKafkaVersion) > 0 ? VERSIONS.version(changedKafkaVersion) : VERSIONS.version(initialKafkaVersion);
 
-        Kafka initialKafka = new KafkaBuilder()
-                .withNewMetadata()
-                    .withName(CLUSTER_NAME)
-                    .withNamespace(NAMESPACE)
-                .endMetadata()
-                .withNewSpec()
-                    .withNewKafka()
-                        .withReplicas(3)
-                        .withVersion(initialKafkaVersion)
-                        .withNewEphemeralStorage()
-                        .endEphemeralStorage()
-                    .endKafka()
-                    .withNewZookeeper()
-                        .withReplicas(3)
-                        .withNewEphemeralStorage()
-                        .endEphemeralStorage()
-                    .endZookeeper()
-                    .withNewEntityOperator()
-                        .withNewTopicOperator()
-                        .endTopicOperator()
-                        .withNewUserOperator()
-                        .endUserOperator()
-                    .endEntityOperator()
-                .endSpec()
-                .build();
+        Map<String, Object> config = new HashMap<>(2);
+        config.put(KafkaConfiguration.LOG_MESSAGE_FORMAT_VERSION, lowerVersion.messageVersion());
+        config.put(KafkaConfiguration.INTERBROKER_PROTOCOL_VERSION, lowerVersion.protocolVersion());
 
-        Kafka updatedKafka = new KafkaBuilder(initialKafka)
+        cluster.getSpec().getKafka().setConfig(config);
+        cluster.getSpec().getKafka().setVersion(initialKafkaVersion);
+
+        // We prepare updated Kafka with new version
+        Kafka updatedKafka = new KafkaBuilder(cluster)
                 .editSpec()
                     .editKafka()
                         .withVersion(changedKafkaVersion)
@@ -845,6 +828,8 @@ public class KafkaAssemblyOperatorMockTest {
         Checkpoint async = context.checkpoint();
         initialReconcile(context)
             .onComplete(context.succeeding())
+            .compose(v -> initialState.getKafkaClusterDescription())
+            .compose(v -> initialState.prepareVersionChange())
             .compose(v -> initialState.getZookeeperDescription())
             .compose(state -> state.zkVersionChange())
             .onComplete(context.succeeding(state -> context.verify(() -> {
@@ -875,18 +860,5 @@ public class KafkaAssemblyOperatorMockTest {
         String changedImage = KafkaVersionTestUtils.PREVIOUS_KAFKA_IMAGE;
 
         reconcileZkVersionChange(context, initialKafkaVersion, changedKafkaVersion, changedImage);
-    }
-
-    @ParameterizedTest
-    @MethodSource("data")
-    public void testReconcileZookeeperUpgradeFromMinorToPrevious(Params params, VertxTestContext context) {
-        init(params);
-
-        String initialKafkaVersion = KafkaVersionTestUtils.PREVIOUS_MINOR_KAFKA_VERSION;
-        String changedKafkaVersion = KafkaVersionTestUtils.PREVIOUS_KAFKA_VERSION;
-        String changedImage = KafkaVersionTestUtils.PREVIOUS_KAFKA_IMAGE;
-
-        reconcileZkVersionChange(context, initialKafkaVersion, changedKafkaVersion, changedImage);
-
     }
 }

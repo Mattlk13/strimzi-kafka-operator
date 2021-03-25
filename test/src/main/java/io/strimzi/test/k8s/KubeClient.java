@@ -5,8 +5,6 @@
 package io.strimzi.test.k8s;
 
 import io.fabric8.kubernetes.api.model.ConfigMap;
-import io.fabric8.kubernetes.api.model.Doneable;
-import io.fabric8.kubernetes.api.model.DoneablePod;
 import io.fabric8.kubernetes.api.model.DeletionPropagation;
 import io.fabric8.kubernetes.api.model.Event;
 import io.fabric8.kubernetes.api.model.HasMetadata;
@@ -22,16 +20,20 @@ import io.fabric8.kubernetes.api.model.Service;
 import io.fabric8.kubernetes.api.model.ServiceAccount;
 import io.fabric8.kubernetes.api.model.apiextensions.v1beta1.CustomResourceDefinition;
 import io.fabric8.kubernetes.api.model.apps.Deployment;
-import io.fabric8.kubernetes.api.model.apps.DoneableStatefulSet;
 import io.fabric8.kubernetes.api.model.apps.StatefulSet;
 import io.fabric8.kubernetes.api.model.batch.Job;
 import io.fabric8.kubernetes.api.model.batch.JobList;
-import io.fabric8.kubernetes.api.model.extensions.Ingress;
+import io.fabric8.kubernetes.api.model.batch.JobStatus;
+import io.fabric8.kubernetes.api.model.networking.v1.Ingress;
+import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicy;
+import io.fabric8.kubernetes.api.model.rbac.ClusterRole;
 import io.fabric8.kubernetes.api.model.rbac.ClusterRoleBinding;
+import io.fabric8.kubernetes.api.model.rbac.Role;
 import io.fabric8.kubernetes.api.model.rbac.RoleBinding;
 import io.fabric8.kubernetes.client.DefaultKubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.VersionInfo;
+import io.fabric8.kubernetes.client.dsl.EditReplacePatchDeletable;
 import io.fabric8.kubernetes.client.dsl.ExecListener;
 import io.fabric8.kubernetes.client.dsl.MixedOperation;
 import io.fabric8.kubernetes.client.dsl.PodResource;
@@ -40,7 +42,6 @@ import io.fabric8.kubernetes.client.dsl.RollableScalableResource;
 import io.fabric8.kubernetes.client.dsl.base.CustomResourceDefinitionContext;
 import io.fabric8.openshift.api.model.DeploymentConfig;
 import io.fabric8.openshift.client.OpenShiftClient;
-import io.fabric8.openshift.client.internal.readiness.OpenShiftReadiness;
 import okhttp3.Response;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -93,6 +94,11 @@ public class KubeClient {
 
     public Namespace getNamespace(String namespace) {
         return client.namespaces().withName(namespace).get();
+    }
+
+    public boolean namespaceExists(String namespace) {
+        return client.namespaces().list().getItems().stream().map(n -> n.getMetadata().getName())
+            .collect(Collectors.toList()).contains(namespace);
     }
 
     public void createNamespace(String name) {
@@ -150,6 +156,10 @@ public class KubeClient {
     // ---------> POD <---------
     // =========================
 
+    public EditReplacePatchDeletable<Pod> editPod(String podName) {
+        return client.pods().inNamespace(getNamespace()).withName(podName).withPropagationPolicy(DeletionPropagation.ORPHAN);
+    }
+
     public String execInPod(String podName, String container, String... command) {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         LOGGER.info("Running command on pod {}: {}", podName, command);
@@ -185,10 +195,22 @@ public class KubeClient {
         return listPods(Collections.singletonMap(key, value));
     }
 
+    public List<Pod> listPods(String clusterName, String key, String value) {
+        return listPods(Collections.singletonMap(key, value)).stream()
+            .filter(pod -> pod.getMetadata().getName().startsWith(clusterName)).collect(Collectors.toList());
+    }
+
     public List<String> listPodNames(String key, String value) {
         return listPods(Collections.singletonMap(key, value)).stream()
                 .map(pod -> pod.getMetadata().getName())
                 .collect(Collectors.toList());
+    }
+
+    public List<String> listPodNames(String clusterName, String key, String value) {
+        return listPods(Collections.singletonMap(key, value)).stream()
+            .filter(pod -> pod.getMetadata().getName().startsWith(clusterName))
+            .map(pod -> pod.getMetadata().getName())
+            .collect(Collectors.toList());
     }
 
 
@@ -211,6 +233,15 @@ public class KubeClient {
                 .collect(Collectors.toList());
     }
 
+    public List<Pod> listKafkaConnectS2IPods(String connectS2iClusterName) {
+        return listPods()
+            .stream().filter(p ->
+                p.getMetadata().getName().startsWith(connectS2iClusterName) &&
+                !p.getMetadata().getName().endsWith("-build") &&
+                !p.getMetadata().getName().endsWith("-deploy"))
+            .collect(Collectors.toList());
+    }
+
     /**
      * Gets pod
      */
@@ -221,7 +252,7 @@ public class KubeClient {
     /**
      * Gets pod
      */
-    public PodResource<Pod, DoneablePod> getPodResource(String name) {
+    public PodResource<Pod> getPodResource(String name) {
         return client.pods().inNamespace(getNamespace()).withName(name);
     }
 
@@ -272,7 +303,7 @@ public class KubeClient {
     /**
      * Gets stateful set
      */
-    public RollableScalableResource<StatefulSet, DoneableStatefulSet> statefulSet(String statefulSetName) {
+    public RollableScalableResource<StatefulSet> statefulSet(String statefulSetName) {
         return client.apps().statefulSets().inNamespace(getNamespace()).withName(statefulSetName);
     }
 
@@ -313,8 +344,19 @@ public class KubeClient {
     }
 
     public String getDeploymentNameByPrefix(String namePrefix) {
+        List<Deployment> prefixDeployments = client.apps().deployments().inNamespace(getNamespace()).list().getItems().stream().filter(
+            rs -> rs.getMetadata().getName().startsWith(namePrefix)).collect(Collectors.toList());
+
+        if (prefixDeployments != null && prefixDeployments.size() > 0) {
+            return prefixDeployments.get(0).getMetadata().getName();
+        } else {
+            return null;
+        }
+    }
+
+    public String getDeploymentBySubstring(String subString) {
         return client.apps().deployments().inNamespace(getNamespace()).list().getItems().stream()
-                .filter(rs -> rs.getMetadata().getName().startsWith(namePrefix)).collect(Collectors.toList()).get(0).getMetadata().getName();
+            .filter(rs -> rs.getMetadata().getName().contains(subString)).collect(Collectors.toList()).get(0).getMetadata().getName();
     }
     /**
      * Gets deployment UID
@@ -375,10 +417,7 @@ public class KubeClient {
      * Gets deployment config status
      */
     public boolean getDeploymentConfigReadiness(String deploymentConfigName) {
-        // isReady() does not work because of https://github.com/fabric8io/kubernetes-client/issues/2537
-        // This method provides a temporary workaround by calling OpenShiftReadiness.isDeploymentConfigReady(...) directly.
-        // TODO: This should be changed to isReady() after https://github.com/fabric8io/kubernetes-client/issues/2537 is fixed.
-        return OpenShiftReadiness.isDeploymentConfigReady(getDeploymentConfig(deploymentConfigName));
+        return Boolean.TRUE.equals(client.adapt(OpenShiftClient.class).deploymentConfigs().inNamespace(getNamespace()).withName(deploymentConfigName).isReady());
     }
 
     // ==================================
@@ -442,8 +481,17 @@ public class KubeClient {
         return client.batch().jobs().inNamespace(getNamespace()).withName(jobName).get();
     }
 
-    public Boolean getJobStatus(String jobName) {
-        return client.batch().jobs().inNamespace(getNamespace()).withName(jobName).get().getStatus().getSucceeded().equals(1);
+    public Boolean checkSucceededJobStatus(String jobName) {
+        return checkSucceededJobStatus(jobName, 1);
+    }
+
+    public Boolean checkSucceededJobStatus(String jobName, int expectedSucceededPods) {
+        return getJobStatus(jobName).getSucceeded().equals(expectedSucceededPods);
+    }
+
+    // Pods Statuses:  0 Running / 0 Succeeded / 1 Failed
+    public JobStatus getJobStatus(String jobName) {
+        return client.batch().jobs().inNamespace(getNamespace()).withName(jobName).get().getStatus();
     }
 
     public JobList getJobList() {
@@ -492,11 +540,11 @@ public class KubeClient {
     // =============================
 
     public Ingress createIngress(Ingress ingress) {
-        return client.extensions().ingresses().inNamespace(getNamespace()).createOrReplace(ingress);
+        return client.network().v1().ingresses().inNamespace(getNamespace()).createOrReplace(ingress);
     }
 
     public Boolean deleteIngress(Ingress ingress) {
-        return client.extensions().ingresses().inNamespace(getNamespace()).delete(ingress);
+        return client.network().v1().ingresses().inNamespace(getNamespace()).delete(ingress);
     }
 
     // =============================
@@ -571,8 +619,25 @@ public class KubeClient {
 
     public List<Event> listEvents(String resourceUid) {
         return listEvents().stream()
-                .filter(event -> event.getInvolvedObject().getUid().equals(resourceUid))
+                .filter(event -> {
+                    if (event.getInvolvedObject().getUid() == null) {
+                        return false;
+                    }
+                    return event.getInvolvedObject().getUid().equals(resourceUid);
+                })
                 .collect(Collectors.toList());
+    }
+
+    // ===========================
+    // ---------> ROLES <---------
+    // ===========================
+
+    public List<Role> listRoles() {
+        return client.rbac().roles().list().getItems();
+    }
+
+    public List<ClusterRole> listClusterRoles() {
+        return client.rbac().clusterRoles().list().getItems();
     }
 
     // ==================================
@@ -591,12 +656,24 @@ public class KubeClient {
         return client.rbac().clusterRoleBindings().inNamespace(getNamespace()).delete(clusterRoleBinding);
     }
 
+    public ClusterRoleBinding getClusterRoleBinding(String name) {
+        return client.rbac().clusterRoleBindings().inNamespace(getNamespace()).withName(name).get();
+    }
+
     public List<RoleBinding> listRoleBindings() {
         return client.rbac().roleBindings().list().getItems();
     }
 
-    public <T extends HasMetadata, L extends KubernetesResourceList<T>, D extends Doneable<T>> MixedOperation<T, L, D, Resource<T, D>> customResources(CustomResourceDefinitionContext crdContext, Class<T> resourceType, Class<L> listClass, Class<D> doneClass) {
-        return client.customResources(crdContext, resourceType, listClass, doneClass); //TODO namespace here
+    public RoleBinding getRoleBinding(String name) {
+        return client.rbac().roleBindings().inNamespace(getNamespace()).withName(name).get();
+    }
+
+    public void deleteRoleBinding(String name) {
+        client.rbac().roleBindings().inNamespace(getNamespace()).withName(name).delete();
+    }
+
+    public <T extends HasMetadata, L extends KubernetesResourceList<T>> MixedOperation<T, L, Resource<T>> customResources(CustomResourceDefinitionContext crdContext, Class<T> resourceType, Class<L> listClass) {
+        return client.customResources(crdContext, resourceType, listClass); //TODO namespace here
     }
 
     // =========================
@@ -604,7 +681,7 @@ public class KubeClient {
     // =========================
 
     public List<CustomResourceDefinition> listCustomResourceDefinition() {
-        return client.customResourceDefinitions().list().getItems();
+        return client.apiextensions().v1beta1().customResourceDefinitions().list().getItems();
     }
 
     private static class SimpleListener implements ExecListener {
@@ -632,6 +709,24 @@ public class KubeClient {
             execLatch.countDown();
         }
     }
+
+    // ====================================
+    // ---------> NETWORK POLICY <---------
+    // ====================================
+
+    public NetworkPolicy getNetworkPolicy(String name) {
+        return client.network().networkPolicies().inNamespace(getNamespace()).withName(name).get();
+    }
+
+    public NetworkPolicy createNetworkPolicy(NetworkPolicy networkPolicy) {
+        return client.network().networkPolicies().inNamespace(getNamespace()).createOrReplace(networkPolicy);
+    }
+
+    public void deleteNetworkPolicy(String name) {
+        client.network().networkPolicies().inNamespace(getNamespace()).withName(name).delete();
+    }
+
+
 
     // ======================================
     // ---------> CLUSTER SPECIFIC <---------

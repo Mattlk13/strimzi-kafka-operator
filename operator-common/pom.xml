@@ -4,7 +4,7 @@
     <parent>
         <groupId>io.strimzi</groupId>
         <artifactId>strimzi</artifactId>
-        <version>0.21.0-SNAPSHOT</version>
+        <version>0.23.0-SNAPSHOT</version>
     </parent>
     <modelVersion>4.0.0</modelVersion>
     <artifactId>operator-common</artifactId>
@@ -36,10 +36,6 @@
         <dependency>
             <groupId>io.fabric8</groupId>
             <artifactId>kubernetes-client</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>io.fabric8</groupId>
-            <artifactId>kubernetes-model-extensions</artifactId>
         </dependency>
         <dependency>
             <groupId>io.fabric8</groupId>
@@ -76,6 +72,10 @@
         <dependency>
             <groupId>io.fabric8</groupId>
             <artifactId>zjsonpatch</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.fabric8</groupId>
+            <artifactId>kubernetes-model-common</artifactId>
         </dependency>
         <dependency>
             <groupId>com.squareup.okhttp3</groupId>
@@ -141,12 +141,12 @@
             <artifactId>mockito-core</artifactId>
         </dependency>
         <dependency>
-            <groupId>io.fabric8</groupId>
-            <artifactId>openshift-server-mock</artifactId>
+            <groupId>io.strimzi</groupId>
+            <artifactId>test</artifactId>
         </dependency>
         <dependency>
             <groupId>io.strimzi</groupId>
-            <artifactId>test</artifactId>
+            <artifactId>mockkube</artifactId>
         </dependency>
         <dependency>
             <groupId>com.github.spotbugs</groupId>

@@ -4,7 +4,6 @@
  */
 package io.strimzi.operator.common.operator.resource;
 
-import io.fabric8.kubernetes.api.model.DoneableService;
 import io.fabric8.kubernetes.api.model.IntOrString;
 import io.fabric8.kubernetes.api.model.Service;
 import io.fabric8.kubernetes.api.model.ServiceBuilder;
@@ -16,12 +15,15 @@ import io.fabric8.kubernetes.client.dsl.ServiceResource;
 import io.vertx.core.Vertx;
 import org.junit.jupiter.api.Test;
 
+import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-public class ServiceOperatorTest extends AbstractResourceOperatorTest<KubernetesClient, Service, ServiceList, DoneableService, ServiceResource<Service, DoneableService>> {
+import java.util.Map;
+
+public class ServiceOperatorTest extends AbstractResourceOperatorTest<KubernetesClient, Service, ServiceList, ServiceResource<Service>> {
 
     @Override
     protected Class<KubernetesClient> clientType() {
@@ -106,6 +108,45 @@ public class ServiceOperatorTest extends AbstractResourceOperatorTest<Kubernetes
     }
 
     @Test
+    void testCattleAnnotationPatching() {
+        KubernetesClient client = mock(KubernetesClient.class);
+
+        Map<String, String> currentAnnotations = Map.of(
+                "field.cattle.io~1publicEndpoints", "foo",
+                "cattle.io/test", "bar",
+                "some-other", "baz"
+        );
+
+        Service current = new ServiceBuilder()
+                .withNewMetadata()
+                    .withNamespace(NAMESPACE)
+                    .withName(RESOURCE_NAME)
+                    .withAnnotations(currentAnnotations)
+                .endMetadata()
+                .withNewSpec()
+                    .withType("LoadBalancer")
+                .endSpec()
+                .build();
+
+        Service desired = new ServiceBuilder()
+                .withNewMetadata()
+                    .withNamespace(NAMESPACE)
+                    .withName(RESOURCE_NAME)
+                .endMetadata()
+                .withNewSpec()
+                    .withType("LoadBalancer")
+                .endSpec()
+                .build();
+
+        ServiceOperator op = new ServiceOperator(vertx, client);
+        op.internalPatch(NAMESPACE, RESOURCE_NAME, current, desired);
+
+        assertThat(desired.getMetadata().getAnnotations().get("field.cattle.io~1publicEndpoints"), equalTo("foo"));
+        assertThat(desired.getMetadata().getAnnotations().get("cattle.io/test"), equalTo("bar"));
+        assertThat(desired.getMetadata().getAnnotations().containsKey("some-other"), is(false));
+    }
+
+    @Test
     public void testHealthCheckPortPatching()  {
         KubernetesClient client = mock(KubernetesClient.class);
 
@@ -115,7 +156,7 @@ public class ServiceOperatorTest extends AbstractResourceOperatorTest<Kubernetes
                     .withName(RESOURCE_NAME)
                 .endMetadata()
                 .withNewSpec()
-                    .withType("Loadbalancer")
+                    .withType("LoadBalancer")
                     .withHealthCheckNodePort(34321)
                 .endSpec()
                 .build();
@@ -126,7 +167,7 @@ public class ServiceOperatorTest extends AbstractResourceOperatorTest<Kubernetes
                 .withName(RESOURCE_NAME)
                 .endMetadata()
                 .withNewSpec()
-                .withType("Loadbalancer")
+                .withType("LoadBalancer")
                 .endSpec()
                 .build();
 

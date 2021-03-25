@@ -27,6 +27,7 @@ public class PodUtils {
 
     private static final Logger LOGGER = LogManager.getLogger(PodUtils.class);
     private static final long DELETION_TIMEOUT = ResourceOperation.getTimeoutForResourceDeletion(Constants.POD);
+    private static final long READINESS_TIMEOUT = ResourceOperation.getTimeoutForResourceReadiness(Constants.POD);
 
     private PodUtils() { }
 
@@ -76,7 +77,7 @@ public class PodUtils {
                     return false;
                 }
                 if (pods.size() != expectPods) {
-                    LOGGER.debug("Expected pods not ready");
+                    LOGGER.debug("Expected pods {} are not ready", selector);
                     return false;
                 }
                 for (Pod pod : pods) {
@@ -276,20 +277,25 @@ public class PodUtils {
      * */
     public static void verifyThatRunningPodsAreStable(String podPrefix) {
         LOGGER.info("Verify that all pods with prefix: {} are stable", podPrefix);
-        verifyThatPodsAreStable(podPrefix);
+        verifyThatPodsAreStable(podPrefix, "Running");
     }
 
-    private static void verifyThatPodsAreStable(String podPrefix) {
+    public static void verifyThatPendingPodsAreStable(String podPrefix) {
+        LOGGER.info("Verify that all pods with prefix: {} are stable in pending phase", podPrefix);
+        verifyThatPodsAreStable(podPrefix, "Pending");
+    }
+
+    private static void verifyThatPodsAreStable(String podPrefix, String phase) {
         int[] stabilityCounter = {0};
         List<Pod> runningPods = kubeClient().listPodsByPrefixInName(podPrefix).stream()
-            .filter(pod -> pod.getStatus().getPhase().equals("Running")).collect(Collectors.toList());
+            .filter(pod -> pod.getStatus().getPhase().equals(phase)).collect(Collectors.toList());
 
-        TestUtils.waitFor("Pods stability", Constants.GLOBAL_POLL_INTERVAL, Constants.GLOBAL_TIMEOUT,
+        TestUtils.waitFor(String.format("Pods stability in phase %s", phase), Constants.GLOBAL_POLL_INTERVAL, Constants.GLOBAL_TIMEOUT,
             () -> {
                 List<Pod> actualPods = runningPods.stream().map(p -> kubeClient().getPod(p.getMetadata().getName())).collect(Collectors.toList());
 
                 for (Pod pod : actualPods) {
-                    if (pod.getStatus().getPhase().equals("Running")) {
+                    if (pod.getStatus().getPhase().equals(phase)) {
                         LOGGER.info("Pod {} is in the {} state. Remaining seconds pod to be stable {}",
                             pod.getMetadata().getName(), pod.getStatus().getPhase(),
                             Constants.GLOBAL_RECONCILIATION_COUNT - stabilityCounter[0]);
@@ -308,5 +314,13 @@ public class PodUtils {
                 }
                 return false;
             });
+    }
+
+    public static void waitForPodContainerReady(String podName, String containerName) {
+        LOGGER.info("Waiting for Pod {} container {} will be ready", podName, containerName);
+        TestUtils.waitFor("Pod " + podName + " container " + containerName + "will be ready", Constants.POLL_INTERVAL_FOR_RESOURCE_READINESS, READINESS_TIMEOUT, () ->
+            kubeClient().getPod(podName).getStatus().getContainerStatuses().stream().filter(container -> container.getName().equals(containerName)).findFirst().get().getReady()
+        );
+        LOGGER.info("Pod {} container {} is ready", podName, containerName);
     }
 }

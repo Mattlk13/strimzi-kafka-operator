@@ -14,7 +14,7 @@
       "type": "grafana",
       "id": "grafana",
       "name": "Grafana",
-      "version": "5.2.0"
+      "version": "7.3.7"
     },
     {
       "type": "panel",
@@ -436,11 +436,11 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "rate(process_cpu_seconds_total{strimzi_io_kind=~\"KafkaMirrorMaker2\",strimzi_io_cluster=\"$strimzi_mirror_maker_cluster_name\"}[1m])",
+          "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=\"$kubernetes_namespace\",pod=~\"$strimzi_mirror_maker_cluster_name-mirrormaker2-.+\",container=\"$strimzi_mirror_maker_cluster_name-mirrormaker2\"}[5m])) by (pod)",
           "format": "time_series",
           "hide": false,
           "intervalFactor": 2,
-          "legendFormat": "{{kubernetes_pod_name}}",
+          "legendFormat": "{{pod}}",
           "metric": "",
           "refId": "A",
           "step": 4
@@ -686,7 +686,7 @@
         "multi": false,
         "name": "kubernetes_namespace",
         "options": [],
-        "query": "query_result(kafka_connect_worker_connector_count)",
+        "query": "query_result(kafka_connect_worker_connector_count{strimzi_io_kind=\"KafkaMirrorMaker2\"})",
         "refresh": 1,
         "regex": "/.*namespace=\"([^\"]*).*/",
         "sort": 0,
@@ -709,7 +709,7 @@
         "multi": false,
         "name": "strimzi_mirror_maker_cluster_name",
         "options": [],
-        "query": "query_result(kafka_connect_worker_connector_count{namespace=\"$kubernetes_namespace\"})",
+        "query": "query_result(kafka_connect_worker_connector_count{namespace=\"$kubernetes_namespace\", strimzi_io_kind=\"KafkaMirrorMaker2\"})",
         "refresh": 1,
         "regex": "/.*strimzi_io_cluster=\"([^\"]*).*/",
         "sort": 0,

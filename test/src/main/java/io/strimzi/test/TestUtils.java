@@ -6,16 +6,20 @@ package io.strimzi.test;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.databind.exc.InvalidFormatException;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import com.fasterxml.jackson.dataformat.yaml.YAMLGenerator;
 import com.fasterxml.jackson.dataformat.yaml.YAMLMapper;
+import com.fasterxml.jackson.dataformat.yaml.YAMLParser;
+import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.HasMetadata;
 import io.fabric8.kubernetes.api.model.OwnerReference;
 import io.vertx.core.VertxException;
@@ -43,6 +47,7 @@ import java.util.AbstractMap;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -65,25 +70,25 @@ public final class TestUtils {
 
     public static final String LINE_SEPARATOR = System.getProperty("line.separator");
 
-    public static final String CRD_TOPIC = USER_PATH + "/../install/cluster-operator/043-Crd-kafkatopic.yaml";
+    public static final String CRD_TOPIC = USER_PATH + "/../packaging/install/cluster-operator/043-Crd-kafkatopic.yaml";
 
-    public static final String CRD_KAFKA = USER_PATH + "/../install/cluster-operator/040-Crd-kafka.yaml";
+    public static final String CRD_KAFKA = USER_PATH + "/../packaging/install/cluster-operator/040-Crd-kafka.yaml";
 
-    public static final String CRD_KAFKA_CONNECT = USER_PATH + "/../install/cluster-operator/041-Crd-kafkaconnect.yaml";
+    public static final String CRD_KAFKA_CONNECT = USER_PATH + "/../packaging/install/cluster-operator/041-Crd-kafkaconnect.yaml";
 
-    public static final String CRD_KAFKA_CONNECT_S2I = USER_PATH + "/../install/cluster-operator/042-Crd-kafkaconnects2i.yaml";
+    public static final String CRD_KAFKA_CONNECT_S2I = USER_PATH + "/../packaging/install/cluster-operator/042-Crd-kafkaconnects2i.yaml";
 
-    public static final String CRD_KAFKA_USER = USER_PATH + "/../install/cluster-operator/044-Crd-kafkauser.yaml";
+    public static final String CRD_KAFKA_USER = USER_PATH + "/../packaging/install/cluster-operator/044-Crd-kafkauser.yaml";
 
-    public static final String CRD_KAFKA_MIRROR_MAKER = USER_PATH + "/../install/cluster-operator/045-Crd-kafkamirrormaker.yaml";
+    public static final String CRD_KAFKA_MIRROR_MAKER = USER_PATH + "/../packaging/install/cluster-operator/045-Crd-kafkamirrormaker.yaml";
 
-    public static final String CRD_KAFKA_BRIDGE = USER_PATH + "/../install/cluster-operator/046-Crd-kafkabridge.yaml";
+    public static final String CRD_KAFKA_BRIDGE = USER_PATH + "/../packaging/install/cluster-operator/046-Crd-kafkabridge.yaml";
 
-    public static final String CRD_KAFKA_MIRROR_MAKER_2 = USER_PATH + "/../install/cluster-operator/048-Crd-kafkamirrormaker2.yaml";
+    public static final String CRD_KAFKA_MIRROR_MAKER_2 = USER_PATH + "/../packaging/install/cluster-operator/048-Crd-kafkamirrormaker2.yaml";
 
-    public static final String CRD_KAFKA_CONNECTOR = USER_PATH + "/../install/cluster-operator/047-Crd-kafkaconnector.yaml";
+    public static final String CRD_KAFKA_CONNECTOR = USER_PATH + "/../packaging/install/cluster-operator/047-Crd-kafkaconnector.yaml";
 
-    public static final String CRD_KAFKA_REBALANCE = USER_PATH + "/../install/cluster-operator/049-Crd-kafkarebalance.yaml";
+    public static final String CRD_KAFKA_REBALANCE = USER_PATH + "/../packaging/install/cluster-operator/049-Crd-kafkarebalance.yaml";
 
     private TestUtils() {
         // All static methods
@@ -271,6 +276,18 @@ public final class TestUtils {
         }
     }
 
+    public static String fromYamlToJson(String yaml) {
+        try {
+            ObjectMapper yamlReader = new ObjectMapper(new YAMLFactory());
+            Object obj = yamlReader.readValue(yaml, Object.class);
+
+            ObjectMapper jsonWriter = new ObjectMapper();
+            return jsonWriter.configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true).writeValueAsString(obj);
+        } catch (JsonProcessingException e) {
+            throw new IllegalArgumentException(e);
+        }
+    }
+
     public static <T> String toYamlString(T instance) {
         ObjectMapper mapper = new YAMLMapper()
                 .disable(YAMLGenerator.Feature.USE_NATIVE_TYPE_ID)
@@ -284,6 +301,27 @@ public final class TestUtils {
 
     public static <T> T configFromYaml(String yamlPath, Class<T> c) {
         return configFromYaml(new File(yamlPath), c);
+    }
+
+    public static ConfigMap configMapFromYaml(String yamlPath, String name) {
+        try {
+            YAMLFactory yaml = new YAMLFactory();
+            ObjectMapper mapper = new ObjectMapper(yaml);
+            YAMLParser yamlParser = yaml.createParser(new File(yamlPath));
+            List<ConfigMap> list = mapper.readValues(yamlParser, new TypeReference<ConfigMap>() { }).readAll();
+            Optional<ConfigMap> cmOpt = list.stream().filter(cm -> "ConfigMap".equals(cm.getKind()) && name.equals(cm.getMetadata().getName())).findFirst();
+            if (cmOpt.isPresent()) {
+                return cmOpt.get();
+            } else {
+                LOGGER.warn("ConfigMap {} not found in file {}", name, yamlPath);
+                return null;
+            }
+        } catch (InvalidFormatException e) {
+            throw new IllegalArgumentException(e);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+
     }
 
     public static <T> T configFromYaml(File yamlFile, Class<T> c) {
@@ -374,6 +412,18 @@ public final class TestUtils {
             subject.put("kind", "ServiceAccount")
                     .put("name", "strimzi-cluster-operator")
                     .put("namespace", namespace);
+            return mapper.writeValueAsString(node);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    public static String setMetadataNamespace(File roleBindingFile, String namespace) {
+        YAMLMapper mapper = new YAMLMapper();
+        try {
+            JsonNode node = mapper.readTree(roleBindingFile);
+            ObjectNode metadata = (ObjectNode) node.get("metadata");
+            metadata.put("namespace", namespace);
             return mapper.writeValueAsString(node);
         } catch (IOException e) {
             throw new RuntimeException(e);

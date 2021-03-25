@@ -4,7 +4,7 @@
  */
 package io.strimzi.systemtest.resources.crd.kafkaclients;
 
-import io.fabric8.kubernetes.api.model.batch.DoneableJob;
+import io.fabric8.kubernetes.api.model.batch.JobBuilder;
 import io.strimzi.api.kafka.model.KafkaResources;
 import io.strimzi.systemtest.keycloak.KeycloakInstance;
 
@@ -13,13 +13,21 @@ import java.security.InvalidParameterException;
 public class KafkaOauthExampleClients extends KafkaBasicExampleClients {
 
     private final String oauthClientId;
+    private String oauthProducerClientId = null;
+    private String oauthConsumerClientId = null;
     private final String oauthClientSecret;
+    private String oauthProducerSecret = null;
+    private String oauthConsumerSecret = null;
     private final String oauthTokenEndpointUri;
     private final String userName;
 
     public static class Builder extends KafkaBasicExampleClients.Builder {
         private String oauthClientId;
+        private String oauthProducerClientId;
+        private String oauthConsumerClientId;
         private String oauthClientSecret;
+        private String oauthProducerSecret;
+        private String oauthConsumerSecret;
         private String oauthTokenEndpointUri;
         private String userName;
 
@@ -28,8 +36,28 @@ public class KafkaOauthExampleClients extends KafkaBasicExampleClients {
             return this;
         }
 
+        public Builder withOAuthProducerClientId(String oauthProducerClientId) {
+            this.oauthProducerClientId = oauthProducerClientId;
+            return this;
+        }
+
+        public Builder withOAuthConsumerClientId(String oauthConsumerClientId) {
+            this.oauthConsumerClientId = oauthConsumerClientId;
+            return this;
+        }
+
         public Builder withOAuthClientSecret(String oauthClientSecret) {
             this.oauthClientSecret = oauthClientSecret;
+            return this;
+        }
+
+        public Builder withOAuthProducerSecret(String oauthProducerSecret) {
+            this.oauthProducerSecret = oauthProducerSecret;
+            return this;
+        }
+
+        public Builder withOAuthConsumerSecret(String oauthConsumerSecret) {
+            this.oauthConsumerSecret = oauthConsumerSecret;
             return this;
         }
 
@@ -91,10 +119,18 @@ public class KafkaOauthExampleClients extends KafkaBasicExampleClients {
 
     protected KafkaOauthExampleClients(KafkaOauthExampleClients.Builder builder) {
         super(builder);
-        if (builder.oauthClientId == null || builder.oauthClientId.isEmpty()) throw new InvalidParameterException("OAuth client id is not set.");
-        if (builder.oauthClientSecret == null || builder.oauthClientSecret.isEmpty()) throw new InvalidParameterException("OAuth client secret is not set.");
+        if ((builder.oauthClientId == null || builder.oauthClientId.isEmpty()) &&
+                (builder.oauthConsumerClientId == null && builder.oauthProducerClientId == null)) throw new InvalidParameterException("OAuth clientId is not set.");
+        if (builder.oauthClientSecret == null || builder.oauthClientSecret.isEmpty() &&
+                (builder.oauthProducerSecret == null && builder.oauthConsumerSecret == null)) throw new InvalidParameterException("OAuth client secret is not set.");
+
         if (builder.oauthTokenEndpointUri == null || builder.oauthTokenEndpointUri.isEmpty()) throw new InvalidParameterException("OAuth token endpoint url is not set.");
         if (builder.userName == null || builder.userName.isEmpty()) builder.userName = builder.oauthClientId;
+
+        if (builder.oauthProducerClientId != null) oauthProducerClientId = builder.oauthProducerClientId;
+        if (builder.oauthProducerSecret != null) oauthProducerSecret = builder.oauthProducerSecret;
+        if (builder.oauthConsumerClientId != null) oauthConsumerClientId = builder.oauthConsumerClientId;
+        if (builder.oauthConsumerSecret != null) oauthConsumerSecret = builder.oauthConsumerSecret;
 
         oauthClientId = builder.oauthClientId;
         oauthClientSecret = builder.oauthClientSecret;
@@ -111,6 +147,10 @@ public class KafkaOauthExampleClients extends KafkaBasicExampleClients {
         super.updateBuilder(builder);
         return builder
             .withOAuthClientId(getOauthClientId())
+            .withOAuthProducerClientId(getOauthProducerClientId())
+            .withOAuthProducerSecret(getOauthProducerSecret())
+            .withOAuthConsumerClientId(getOauthConsumerClientId())
+            .withOAuthConsumerSecret(getOauthConsumerSecret())
             .withOAuthClientSecret(getOauthClientSecret())
             .withOAuthTokenEndpointUri(getOauthTokenEndpointUri())
             .withUserName(getClientUserName());
@@ -125,6 +165,22 @@ public class KafkaOauthExampleClients extends KafkaBasicExampleClients {
         return oauthClientId;
     }
 
+    public String getOauthProducerClientId() {
+        return oauthProducerClientId;
+    }
+
+    public String getOauthConsumerClientId() {
+        return oauthConsumerClientId;
+    }
+
+    public String getOauthProducerSecret() {
+        return oauthProducerSecret;
+    }
+
+    public String getOauthConsumerSecret() {
+        return oauthConsumerSecret;
+    }
+
     public String getOauthClientSecret() {
         return oauthClientSecret;
     }
@@ -137,22 +193,26 @@ public class KafkaOauthExampleClients extends KafkaBasicExampleClients {
         return userName;
     }
 
-    public DoneableJob producerStrimziOauthPlain() {
+    public JobBuilder producerStrimziOauthPlain() {
+        return defaultProducerStrimziOauthPlain();
+    }
 
-        return producerStrimzi()
+    private JobBuilder defaultProducerStrimziOauthPlain() {
+
+        return defaultProducerStrimzi()
             .editSpec()
                 .editTemplate()
                     .editSpec()
                         .editFirstContainer()
                             .addNewEnv()
                                 .withName("OAUTH_CLIENT_ID")
-                                .withValue(oauthClientId)
+                                .withValue(oauthProducerClientId != null ? oauthProducerClientId : oauthClientId)
                             .endEnv()
                             .addNewEnv()
                                 .withName("OAUTH_CLIENT_SECRET")
                                 .editOrNewValueFrom()
                                     .withNewSecretKeyRef()
-                                        .withName(oauthClientSecret)
+                                        .withName(oauthProducerSecret != null ? oauthProducerSecret : oauthClientSecret)
                                         .withKey("clientSecret")
                                     .endSecretKeyRef()
                                 .endValueFrom()
@@ -176,9 +236,9 @@ public class KafkaOauthExampleClients extends KafkaBasicExampleClients {
             .endSpec();
     }
 
-    public DoneableJob producerStrimziOauthTls(String clusterName) {
+    public JobBuilder producerStrimziOauthTls(String clusterName) {
 
-        return producerStrimziOauthPlain()
+        return defaultProducerStrimziOauthPlain()
             .editSpec()
                 .editTemplate()
                     .editSpec()
@@ -201,7 +261,7 @@ public class KafkaOauthExampleClients extends KafkaBasicExampleClients {
                                 .withName("USER_CRT")
                                 .withNewValueFrom()
                                     .withNewSecretKeyRef()
-                                        .withName(userName)
+                                        .withName(oauthProducerClientId != null ? oauthProducerClientId : userName)
                                         .withKey("user.crt")
                                     .endSecretKeyRef()
                                 .endValueFrom()
@@ -210,7 +270,7 @@ public class KafkaOauthExampleClients extends KafkaBasicExampleClients {
                                 .withName("USER_KEY")
                                 .withNewValueFrom()
                                     .withNewSecretKeyRef()
-                                        .withName(userName)
+                                        .withName(oauthProducerClientId != null ? oauthProducerClientId : userName)
                                         .withKey("user.key")
                                     .endSecretKeyRef()
                                 .endValueFrom()
@@ -221,22 +281,26 @@ public class KafkaOauthExampleClients extends KafkaBasicExampleClients {
             .endSpec();
     }
 
-    public DoneableJob consumerStrimziOauthPlain() {
+    public JobBuilder consumerStrimziOauthPlain() {
+        return defaultConsumerStrimziOauth();
+    }
 
-        return consumerStrimzi()
+    private JobBuilder defaultConsumerStrimziOauth() {
+
+        return defaultConsumerStrimzi()
             .editSpec()
                 .editTemplate()
                     .editSpec()
                         .editFirstContainer()
                             .addNewEnv()
                                 .withName("OAUTH_CLIENT_ID")
-                                .withValue(oauthClientId)
+                                .withValue(oauthConsumerClientId != null ? oauthConsumerClientId : oauthClientId)
                             .endEnv()
                             .addNewEnv()
                                 .withName("OAUTH_CLIENT_SECRET")
                                 .editOrNewValueFrom()
                                     .withNewSecretKeyRef()
-                                        .withName(oauthClientSecret)
+                                        .withName(oauthConsumerSecret != null ? oauthConsumerSecret : oauthClientSecret)
                                         .withKey("clientSecret")
                                     .endSecretKeyRef()
                                 .endValueFrom()
@@ -264,9 +328,9 @@ public class KafkaOauthExampleClients extends KafkaBasicExampleClients {
             .endSpec();
     }
 
-    public DoneableJob consumerStrimziOauthTls(String clusterName) {
+    public JobBuilder consumerStrimziOauthTls(String clusterName) {
 
-        return consumerStrimziOauthPlain()
+        return defaultConsumerStrimziOauth()
             .editSpec()
                 .editTemplate()
                     .editSpec()
@@ -289,7 +353,7 @@ public class KafkaOauthExampleClients extends KafkaBasicExampleClients {
                                 .withName("USER_CRT")
                                 .withNewValueFrom()
                                     .withNewSecretKeyRef()
-                                        .withName(userName)
+                                        .withName(oauthConsumerClientId != null ? oauthConsumerClientId : userName)
                                         .withKey("user.crt")
                                     .endSecretKeyRef()
                                 .endValueFrom()
@@ -298,7 +362,7 @@ public class KafkaOauthExampleClients extends KafkaBasicExampleClients {
                                 .withName("USER_KEY")
                                 .withNewValueFrom()
                                     .withNewSecretKeyRef()
-                                        .withName(userName)
+                                        .withName(oauthConsumerClientId != null ? oauthConsumerClientId : userName)
                                         .withKey("user.key")
                                     .endSecretKeyRef()
                                 .endValueFrom()

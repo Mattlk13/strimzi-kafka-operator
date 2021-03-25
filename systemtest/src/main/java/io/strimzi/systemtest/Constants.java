@@ -4,6 +4,8 @@
  */
 package io.strimzi.systemtest;
 
+import io.strimzi.test.TestUtils;
+
 import java.time.Duration;
 
 /**
@@ -25,6 +27,7 @@ public interface Constants {
 
     long TIMEOUT_TEARDOWN = Duration.ofSeconds(10).toMillis();
     long GLOBAL_TIMEOUT = Duration.ofMinutes(5).toMillis();
+    long GLOBAL_CMD_CLIENT_TIMEOUT = Duration.ofMinutes(5).toMillis();
     long GLOBAL_STATUS_TIMEOUT = Duration.ofMinutes(3).toMillis();
     long GLOBAL_POLL_INTERVAL = Duration.ofSeconds(1).toMillis();
     long GLOBAL_POLL_INTERVAL_MEDIUM = Duration.ofSeconds(10).toMillis();
@@ -36,6 +39,8 @@ public interface Constants {
     long API_CRUISE_CONTROL_TIMEOUT = Duration.ofMinutes(10).toMillis();
     long GLOBAL_CRUISE_CONTROL_TIMEOUT = Duration.ofMinutes(1).toMillis();
 
+    long OLM_UPGRADE_INSTALL_PLAN_TIMEOUT = Duration.ofMinutes(15).toMillis();
+    long OLM_UPGRADE_INSTALL_PLAN_POLL = Duration.ofMinutes(1).toMillis();
 
     long GLOBAL_CLIENTS_POLL = Duration.ofSeconds(15).toMillis();
     long GLOBAL_CLIENTS_TIMEOUT = Duration.ofMinutes(2).toMillis();
@@ -47,6 +52,10 @@ public interface Constants {
     long CO_OPERATION_TIMEOUT_MEDIUM = Duration.ofMinutes(2).toMillis();
     long RECONCILIATION_INTERVAL = Duration.ofSeconds(30).toMillis();
     long LOGGING_RELOADING_INTERVAL = Duration.ofSeconds(30).toMillis();
+
+    // Keycloak
+    long KEYCLOAK_DEPLOYMENT_POLL = Duration.ofSeconds(5).toMillis();
+    long KEYCLOAK_DEPLOYMENT_TIMEOUT = Duration.ofMinutes(10).toMillis();
 
     // stability count ensures that after some reconciliation we have some additional time
     int GLOBAL_STABILITY_OFFSET_COUNT = 20;
@@ -65,6 +74,10 @@ public interface Constants {
     String ALWAYS_IMAGE_PULL_POLICY = "Always";
     String IF_NOT_PRESENT_IMAGE_PULL_POLICY = "IfNotPresent";
 
+    String STRIMZI_EXAMPLE_PRODUCER_NAME = "java-kafka-producer";
+    String STRIMZI_EXAMPLE_CONSUMER_NAME = "java-kafka-consumer";
+    String STRIMZI_EXAMPLE_STREAMS_NAME = "java-kafka-streams";
+
     /**
      * Constants for specific ports
      */
@@ -77,6 +90,7 @@ public interface Constants {
     int KAFKA_BRIDGE_METRICS_PORT = 8080;
 
     String DEPLOYMENT = "Deployment";
+    String DEPLOYMENT_TYPE = "deployment-type";
     String SERVICE = "Service";
     String INGRESS = "Ingress";
     String CLUSTER_ROLE_BINDING = "ClusterRoleBinding";
@@ -87,6 +101,7 @@ public interface Constants {
     String KAFKA_CRUISE_CONTROL_DEPLOYMENT = "KafkaWithCruiseControl";
     String STATEFUL_SET = "StatefulSet";
     String POD = "Pod";
+    String NETWORK_POLICY = "NetworkPolicy";
 
     /**
      * Kafka Bridge JSON encoding with JSON embedded format
@@ -107,12 +122,29 @@ public interface Constants {
     int HTTP_KEYCLOAK_DEFAULT_NODE_PORT = 32482;
 
     /**
+     * Basic paths to examples
+     */
+    String PATH_TO_PACKAGING_EXAMPLES = TestUtils.USER_PATH + "/../packaging/examples";
+    String PATH_TO_PACKAGING_INSTALL_FILES = TestUtils.USER_PATH + "/../packaging/install";
+
+    /**
+     * File paths for metrics YAMLs
+     */
+    String PATH_TO_KAFKA_METRICS_CONFIG = PATH_TO_PACKAGING_EXAMPLES + "/metrics/kafka-metrics.yaml";
+    String PATH_TO_KAFKA_CRUISE_CONTROL_METRICS_CONFIG = PATH_TO_PACKAGING_EXAMPLES + "/metrics/kafka-cruise-control-metrics.yaml";
+    String PATH_TO_KAFKA_CONNECT_METRICS_CONFIG = PATH_TO_PACKAGING_EXAMPLES + "/metrics/kafka-connect-metrics.yaml";
+    String PATH_TO_KAFKA_CONNECT_S2I_CONFIG = PATH_TO_PACKAGING_EXAMPLES + "/connect/kafka-connect-s2i.yaml";
+    String PATH_TO_KAFKA_MIRROR_MAKER_2_METRICS_CONFIG = PATH_TO_PACKAGING_EXAMPLES + "/metrics/kafka-mirror-maker-2-metrics.yaml";
+
+    String METRICS_CONFIG_YAML_NAME = "metrics-config.yml";
+
+    /**
      * Default value which allows execution of tests with any tags
      */
     String DEFAULT_TAG = "all";
 
     /**
-     * Tag for acceptance tests, which are triggered for each push/pr/merge on travis-ci
+     * Tag for acceptance tests, which can be triggered manually for each push/pr/merge on Azure
      */
     String ACCEPTANCE = "acceptance";
 
@@ -125,6 +157,11 @@ public interface Constants {
      * Tag for upgrade tests.
      */
     String UPGRADE = "upgrade";
+
+    /**
+     * Tag for olm upgrade tests
+     */
+    String OLM_UPGRADE = "olmupgrade";
 
     /**
      * Tag for smoke tests

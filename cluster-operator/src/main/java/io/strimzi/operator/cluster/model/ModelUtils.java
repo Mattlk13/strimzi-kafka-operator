@@ -10,6 +10,7 @@ import io.fabric8.kubernetes.api.model.Affinity;
 import io.fabric8.kubernetes.api.model.AffinityBuilder;
 import io.fabric8.kubernetes.api.model.Container;
 import io.fabric8.kubernetes.api.model.EnvVar;
+import io.fabric8.kubernetes.api.model.LabelSelector;
 import io.fabric8.kubernetes.api.model.NodeSelectorRequirement;
 import io.fabric8.kubernetes.api.model.NodeSelectorRequirementBuilder;
 import io.fabric8.kubernetes.api.model.NodeSelectorTerm;
@@ -19,13 +20,16 @@ import io.fabric8.kubernetes.api.model.Secret;
 import io.fabric8.kubernetes.api.model.SecretBuilder;
 import io.fabric8.kubernetes.api.model.Toleration;
 import io.fabric8.kubernetes.api.model.apps.StatefulSet;
+import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicyPeer;
 import io.strimzi.api.kafka.model.CertificateAuthority;
+import io.strimzi.api.kafka.model.HasConfigurableMetrics;
 import io.strimzi.api.kafka.model.SystemProperty;
 import io.strimzi.api.kafka.model.storage.JbodStorage;
 import io.strimzi.api.kafka.model.storage.PersistentClaimStorage;
 import io.strimzi.api.kafka.model.storage.Storage;
 import io.strimzi.api.kafka.model.TlsSidecar;
 import io.strimzi.api.kafka.model.TlsSidecarLogLevel;
+import io.strimzi.api.kafka.model.template.DeploymentTemplate;
 import io.strimzi.api.kafka.model.template.PodDisruptionBudgetTemplate;
 import io.strimzi.api.kafka.model.template.PodTemplate;
 import io.strimzi.certs.CertAndKey;
@@ -37,12 +41,10 @@ import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.Collections;
-import java.util.Date;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -86,10 +88,6 @@ public class ModelUtils {
         }
 
         return renewalDays;
-    }
-
-    public static String formatTimestamp(Date date) {
-        return new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssZ").format(date);
     }
 
     /**
@@ -234,7 +232,6 @@ public class ModelUtils {
      * @param model AbstractModel class where the values from the PodTemplate should be set
      * @param pod PodTemplate with the values form the CRD
      */
-
     public static void parsePodTemplate(AbstractModel model, PodTemplate pod)   {
         if (pod != null)  {
             if (pod.getMetadata() != null) {
@@ -247,7 +244,7 @@ public class ModelUtils {
             }
 
             if (pod.getTolerations() != null)   {
-                model.setTolerations(pod.getTolerations());
+                model.setTolerations(removeEmptyValuesFromTolerations(pod.getTolerations()));
             }
 
             model.templateTerminationGracePeriodSeconds = pod.getTerminationGracePeriodSeconds();
@@ -256,6 +253,28 @@ public class ModelUtils {
             model.templatePodPriorityClassName = pod.getPriorityClassName();
             model.templatePodSchedulerName = pod.getSchedulerName();
             model.templatePodHostAliases = pod.getHostAliases();
+            model.templatePodTopologySpreadConstraints = pod.getTopologySpreadConstraints();
+        }
+    }
+
+    /**
+     * Parses the values from the DeploymentTemplate in CRD model into the component model
+     *
+     * @param model AbstractModel class where the values from the DeploymentTemplate should be set
+     * @param template DeploymentTemplate with the values form the CRD
+     */
+    public static void parseDeploymentTemplate(AbstractModel model, DeploymentTemplate template)   {
+        if (template != null) {
+            if (template.getMetadata() != null) {
+                model.templateDeploymentLabels = template.getMetadata().getLabels();
+                model.templateDeploymentAnnotations = template.getMetadata().getAnnotations();
+            }
+
+            if (template.getDeploymentStrategy() != null)   {
+                model.templateDeploymentStrategy = template.getDeploymentStrategy();
+            } else {
+                model.templateDeploymentStrategy = io.strimzi.api.kafka.model.template.DeploymentStrategy.ROLLING_UPDATE;
+            }
         }
     }
 
@@ -322,12 +341,16 @@ public class ModelUtils {
         Map<String, String> currentData = current.getData();
         Map<String, String> desiredData = desired.getData();
 
-        for (Map.Entry<String, String> entry : currentData.entrySet()) {
-            String desiredValue = desiredData.get(entry.getKey());
-            if (entry.getValue() != null
-                    && desiredValue != null
-                    && !entry.getValue().equals(desiredValue)) {
-                return true;
+        if (currentData == null) {
+            return true;
+        } else {
+            for (Map.Entry<String, String> entry : currentData.entrySet()) {
+                String desiredValue = desiredData.get(entry.getKey());
+                if (entry.getValue() != null
+                        && desiredValue != null
+                        && !entry.getValue().equals(desiredValue)) {
+                    return true;
+                }
             }
         }
 
@@ -374,35 +397,18 @@ public class ModelUtils {
      * If the toleration.value is an empty string, set it to null. That solves an issue when built STS contains a filed
      * with an empty property value. K8s is removing properties like this and thus we cannot fetch an equal STS which was
      * created with (some) empty value.
-     * @param tolerations tolerations list to check whether toleration.value is an empty string and eventually replace it by null
+     *
+     * @param tolerations   Tolerations list to check whether toleration.value is an empty string and eventually replace it by null
+     *
+     * @return              List of tolerations with fixed empty strings
      */
-    public static void removeEmptyValuesFromTolerations(List<Toleration> tolerations) {
+    public static List<Toleration> removeEmptyValuesFromTolerations(List<Toleration> tolerations) {
         if (tolerations != null) {
             tolerations.stream().filter(toleration -> toleration.getValue() != null && toleration.getValue().isEmpty()).forEach(emptyValTol -> emptyValTol.setValue(null));
-        }
-    }
-
-    /**
-     * Checks whether tolerations and template.tolerations exits. If so, latter takes precedence. Entries like tolerations.value == ""
-     * are replaced by tolerations.value = null
-     * @param tolerations path to tolerations in CR
-     * @param tolerationList tolerations
-     * @param templateTolerations path to template.tolerations in CR
-     * @param podTemplate pod template containing tolerations
-     * @return adjusted list with tolerations
-     */
-    public static List<Toleration> tolerations(String tolerations, List<Toleration> tolerationList, String templateTolerations, PodTemplate podTemplate) {
-        List<Toleration> tolerationsListLocal;
-        if (podTemplate != null && podTemplate.getTolerations() != null) {
-            if (tolerationList != null) {
-                log.warn("Tolerations given on both {} and {}; latter takes precedence", tolerations, templateTolerations);
-            }
-            tolerationsListLocal = podTemplate.getTolerations();
+            return tolerations;
         } else {
-            tolerationsListLocal = tolerationList;
+            return null;
         }
-        removeEmptyValuesFromTolerations(tolerationsListLocal);
-        return tolerationsListLocal;
     }
 
     /**
@@ -453,5 +459,49 @@ public class ModelUtils {
                     .endNodeAffinity();
         }
         return builder;
+    }
+
+    /**
+     * Decides whether the Cluster Operator needs namespaceSelector to be configured in the network policies in order
+     * to talk with the operands. This follows the following rules:
+     *     - If it runs in the same namespace as the operand, do not set namespace selector
+     *     - If it runs in a different namespace, but user provided selector labels, use the labels
+     *     - If it runs in a different namespace, and user didn't provided selector labels, open it to COs in all namespaces
+     *
+     * @param peer                      Network policy peer where the namespace selector should be set
+     * @param operandNamespace          Namespace of the operand
+     * @param operatorNamespace         Namespace of the Strimzi CO
+     * @param operatorNamespaceLabels   Namespace labels provided by the user
+     */
+    public static void setClusterOperatorNetworkPolicyNamespaceSelector(NetworkPolicyPeer peer, String operandNamespace, String operatorNamespace, Labels operatorNamespaceLabels)   {
+        if (!operandNamespace.equals(operatorNamespace)) {
+            // If CO and the operand do not run in the same namespace, we need to handle cross namespace access
+
+            if (operatorNamespaceLabels != null && !operatorNamespaceLabels.toMap().isEmpty())    {
+                // If user specified the namespace labels, we can use them to make the network policy as tight as possible
+                LabelSelector nsLabelSelector = new LabelSelector();
+                nsLabelSelector.setMatchLabels(operatorNamespaceLabels.toMap());
+                peer.setNamespaceSelector(nsLabelSelector);
+            } else {
+                // If no namespace labels were specified, we open the network policy to COs in all namespaces
+                peer.setNamespaceSelector(new LabelSelector());
+            }
+        }
+    }
+
+    /**
+     * Checks if the section of the custom resource has any metrics configuration and sets it in the AbstractModel.
+     *
+     * @param model                     The cluster model where the metrics will be configured
+     * @param resourceWithMetrics       The section of the resource with metrics configuration
+     */
+    public static void parseMetrics(AbstractModel model, HasConfigurableMetrics resourceWithMetrics)   {
+        if (resourceWithMetrics.getMetricsConfig() != null)    {
+            model.setMetricsEnabled(true);
+            model.setMetricsConfigInCm(resourceWithMetrics.getMetricsConfig());
+        } else if (resourceWithMetrics.getMetrics() != null) {
+            model.setMetricsEnabled(true);
+            model.setMetricsConfig(resourceWithMetrics.getMetrics().entrySet());
+        }
     }
 }

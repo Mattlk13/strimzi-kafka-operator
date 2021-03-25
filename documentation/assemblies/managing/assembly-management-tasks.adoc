@@ -10,6 +10,12 @@ This chapter covers tasks to maintain a deployment of Strimzi.
 //using kubectl commands and status
 include::assembly-working-with-resources.adoc[leveloffset=+1]
 
+//pausing reconciliation of custom resources
+include::modules/proc-pausing-reconciliation.adoc[leveloffset=+1]
+
+//performing manual rolling updates
+include::assembly-rolling-updates.adoc[leveloffset=+1]
+
 //Discover internal bootstrap service and HTTP Bridge
 include::modules/con-service-discovery.adoc[leveloffset=+1]
 
@@ -21,3 +27,6 @@ include::assembly-client-config.adoc[leveloffset=+1]
 
 //Uninstall the product
 include::modules/proc-uninstalling.adoc[leveloffset=+1]
+
+//faqs for cluster operator
+include::modules/con-cluster-operator-faqs.adoc[leveloffset=+1]

@@ -9,7 +9,6 @@ import io.fabric8.kubernetes.api.model.ServiceAccount;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.dsl.Resource;
 import io.strimzi.api.kafka.KafkaBridgeList;
-import io.strimzi.api.kafka.model.DoneableKafkaBridge;
 import io.strimzi.api.kafka.model.ExternalLogging;
 import io.strimzi.api.kafka.model.KafkaBridge;
 import io.strimzi.api.kafka.model.KafkaBridgeSpec;
@@ -24,6 +23,8 @@ import io.strimzi.operator.cluster.operator.resource.ResourceOperatorSupplier;
 import io.strimzi.operator.common.PasswordGenerator;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.ReconciliationException;
+import io.strimzi.operator.common.Util;
+import io.strimzi.operator.common.operator.resource.ConfigMapOperator;
 import io.strimzi.operator.common.operator.resource.DeploymentOperator;
 import io.strimzi.operator.common.operator.resource.ReconcileResult;
 import io.strimzi.operator.common.operator.resource.StatusUtils;
@@ -41,7 +42,7 @@ import java.util.Collections;
  *     <li>A Kafka Bridge Deployment and related Services</li>
  * </ul>
  */
-public class KafkaBridgeAssemblyOperator extends AbstractAssemblyOperator<KubernetesClient, KafkaBridge, KafkaBridgeList, DoneableKafkaBridge, Resource<KafkaBridge, DoneableKafkaBridge>, KafkaBridgeSpec, KafkaBridgeStatus> {
+public class KafkaBridgeAssemblyOperator extends AbstractAssemblyOperator<KubernetesClient, KafkaBridge, KafkaBridgeList, Resource<KafkaBridge>, KafkaBridgeSpec, KafkaBridgeStatus> {
     private static final Logger log = LogManager.getLogger(KafkaBridgeAssemblyOperator.class.getName());
 
     private final DeploymentOperator deploymentOperations;
@@ -78,10 +79,6 @@ public class KafkaBridgeAssemblyOperator extends AbstractAssemblyOperator<Kubern
             return Future.failedFuture(new ReconciliationException(kafkaBridgeStatus, e));
         }
 
-        ConfigMap logAndMetricsConfigMap = bridge.generateMetricsAndLogConfigMap(bridge.getLogging() instanceof ExternalLogging ?
-                configMapOperations.get(namespace, ((ExternalLogging) bridge.getLogging()).getName()) :
-                null);
-
         Promise<KafkaBridgeStatus> createOrUpdatePromise = Promise.promise();
 
         boolean bridgeHasZeroReplicas = bridge.getReplicas() == 0;
@@ -89,7 +86,8 @@ public class KafkaBridgeAssemblyOperator extends AbstractAssemblyOperator<Kubern
         kafkaBridgeServiceAccount(namespace, bridge)
             .compose(i -> deploymentOperations.scaleDown(namespace, bridge.getName(), bridge.getReplicas()))
             .compose(scale -> serviceOperations.reconcile(namespace, bridge.getServiceName(), bridge.generateService()))
-            .compose(i -> configMapOperations.reconcile(namespace, bridge.getAncillaryConfigMapName(), logAndMetricsConfigMap))
+            .compose(i -> Util.metricsAndLogging(configMapOperations, namespace, bridge.getLogging(), null))
+            .compose(metricsAndLogging -> configMapOperations.reconcile(namespace, bridge.getAncillaryConfigMapName(), bridge.generateMetricsAndLogConfigMap(metricsAndLogging)))
             .compose(i -> podDisruptionBudgetOperator.reconcile(namespace, bridge.getName(), bridge.generatePodDisruptionBudget()))
             .compose(i -> deploymentOperations.reconcile(namespace, bridge.getName(), bridge.generateDeployment(Collections.emptyMap(), pfa.isOpenshift(), imagePullPolicy, imagePullSecrets)))
             .compose(i -> deploymentOperations.scaleUp(namespace, bridge.getName(), bridge.getReplicas()))
@@ -127,5 +125,13 @@ public class KafkaBridgeAssemblyOperator extends AbstractAssemblyOperator<Kubern
         return serviceAccountOperations.reconcile(namespace,
                 KafkaBridgeResources.serviceAccountName(bridge.getCluster()),
                 bridge.generateServiceAccount());
+    }
+
+    public static Future<ConfigMap> getLoggingCmAsync(ConfigMapOperator configMapOperations, String namespace, KafkaBridgeCluster model) {
+        if (model.getLogging() instanceof ExternalLogging) {
+            return Util.getExternalLoggingCm(configMapOperations, namespace, (ExternalLogging) model.getLogging());
+        } else {
+            return Future.succeededFuture(null);
+        }
     }
 }

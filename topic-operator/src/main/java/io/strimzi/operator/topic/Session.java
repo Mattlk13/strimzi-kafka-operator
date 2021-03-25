@@ -4,14 +4,16 @@
  */
 package io.strimzi.operator.topic;
 
+import io.apicurio.registry.utils.ConcurrentUtil;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.Watch;
+import io.fabric8.kubernetes.client.dsl.base.CustomResourceDefinitionContext;
+import io.micrometer.prometheus.PrometheusMeterRegistry;
 import io.strimzi.api.kafka.Crds;
 import io.strimzi.api.kafka.KafkaTopicList;
-import io.strimzi.api.kafka.model.DoneableKafkaTopic;
 import io.strimzi.api.kafka.model.KafkaTopic;
-import io.strimzi.operator.common.Util;
 import io.strimzi.operator.common.MicrometerMetricsProvider;
+import io.strimzi.operator.common.Util;
 import io.strimzi.operator.topic.zk.Zk;
 import io.vertx.core.AbstractVerticle;
 import io.vertx.core.Future;
@@ -23,13 +25,15 @@ import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.AdminClientConfig;
 import org.apache.kafka.common.config.SslConfigs;
 import org.apache.kafka.common.errors.TimeoutException;
+import org.apache.kafka.streams.StreamsConfig;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.security.Security;
 import java.time.Duration;
 import java.util.Properties;
-import io.micrometer.prometheus.PrometheusMeterRegistry;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 
 public class Session extends AbstractVerticle {
 
@@ -44,12 +48,14 @@ public class Session extends AbstractVerticle {
     /*test*/ KafkaImpl kafka;
     private AdminClient adminClient;
     /*test*/ K8sImpl k8s;
+    private KafkaStreamsTopicStoreService service; // if used
     /*test*/ TopicOperator topicOperator;
-    private Watch topicWatch;
+    /*test*/ Watch topicWatch;
     /*test*/ ZkTopicsWatcher topicsWatcher;
     /*test*/ TopicConfigsWatcher topicConfigsWatcher;
     /*test*/ ZkTopicWatcher topicWatcher;
     /*test*/ PrometheusMeterRegistry metricsRegistry;
+    K8sTopicWatcher watcher;
     /** The id of the periodic reconciliation timer. This is null during a periodic reconciliation. */
     private volatile Long timerId;
     private volatile boolean stopped = false;
@@ -87,7 +93,7 @@ public class Session extends AbstractVerticle {
             topicsWatcher.stop();
 
             Promise<Void> promise = Promise.promise();
-            Handler<Long> longHandler = new Handler<Long>() {
+            Handler<Long> longHandler = new Handler<>() {
                 @Override
                 public void handle(Long inflightTimerId) {
                     if (!topicOperator.isWorkInflight()) {
@@ -103,6 +109,14 @@ public class Session extends AbstractVerticle {
                 }
             };
             longHandler.handle(null);
+
+            promise.future().compose(ignored -> {
+                if (service != null) {
+                    service.stop();
+                }
+                return Future.succeededFuture();
+            });
+
             promise.future().compose(ignored -> {
 
                 LOGGER.debug("Disconnecting from zookeeper {}", zk);
@@ -119,7 +133,7 @@ public class Session extends AbstractVerticle {
                             healthServer.close();
                         }
                     } catch (TimeoutException e) {
-                        LOGGER.warn("Timeout while closing AdminClient with timeout {}ms", e, timeoutMs);
+                        LOGGER.warn("Timeout while closing AdminClient with timeout {}ms", timeoutMs, e);
                     } finally {
                         LOGGER.info("Stopped");
                         blockingResult.complete();
@@ -130,26 +144,26 @@ public class Session extends AbstractVerticle {
         }, stop);
     }
 
-    @SuppressWarnings("deprecation")
     @Override
     public void start(Promise<Void> start) {
         LOGGER.info("Starting");
-        Properties adminClientProps = new Properties();
+        Properties kafkaClientProps = new Properties();
 
         String dnsCacheTtl = System.getenv("STRIMZI_DNS_CACHE_TTL") == null ? "30" : System.getenv("STRIMZI_DNS_CACHE_TTL");
         Security.setProperty("networkaddress.cache.ttl", dnsCacheTtl);
-        adminClientProps.setProperty(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, config.get(Config.KAFKA_BOOTSTRAP_SERVERS));
+        kafkaClientProps.setProperty(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, config.get(Config.KAFKA_BOOTSTRAP_SERVERS));
+        kafkaClientProps.setProperty(StreamsConfig.APPLICATION_ID_CONFIG, config.get(Config.APPLICATION_ID));
 
-        if (Boolean.valueOf(config.get(Config.TLS_ENABLED))) {
-            adminClientProps.setProperty(AdminClientConfig.SECURITY_PROTOCOL_CONFIG, "SSL");
-            adminClientProps.setProperty(SslConfigs.SSL_TRUSTSTORE_LOCATION_CONFIG, config.get(Config.TLS_TRUSTSTORE_LOCATION));
-            adminClientProps.setProperty(SslConfigs.SSL_TRUSTSTORE_PASSWORD_CONFIG, config.get(Config.TLS_TRUSTSTORE_PASSWORD));
-            adminClientProps.setProperty(SslConfigs.SSL_KEYSTORE_LOCATION_CONFIG, config.get(Config.TLS_KEYSTORE_LOCATION));
-            adminClientProps.setProperty(SslConfigs.SSL_KEYSTORE_PASSWORD_CONFIG, config.get(Config.TLS_KEYSTORE_PASSWORD));
-            adminClientProps.setProperty(SslConfigs.SSL_ENDPOINT_IDENTIFICATION_ALGORITHM_CONFIG, config.get(Config.TLS_SSL_ENDPOINT_IDENTIFICATION_ALGORITHM));
+        if (Boolean.parseBoolean(config.get(Config.TLS_ENABLED))) {
+            kafkaClientProps.setProperty(AdminClientConfig.SECURITY_PROTOCOL_CONFIG, "SSL");
+            kafkaClientProps.setProperty(SslConfigs.SSL_TRUSTSTORE_LOCATION_CONFIG, config.get(Config.TLS_TRUSTSTORE_LOCATION));
+            kafkaClientProps.setProperty(SslConfigs.SSL_TRUSTSTORE_PASSWORD_CONFIG, config.get(Config.TLS_TRUSTSTORE_PASSWORD));
+            kafkaClientProps.setProperty(SslConfigs.SSL_KEYSTORE_LOCATION_CONFIG, config.get(Config.TLS_KEYSTORE_LOCATION));
+            kafkaClientProps.setProperty(SslConfigs.SSL_KEYSTORE_PASSWORD_CONFIG, config.get(Config.TLS_KEYSTORE_PASSWORD));
+            kafkaClientProps.setProperty(SslConfigs.SSL_ENDPOINT_IDENTIFICATION_ALGORITHM_CONFIG, config.get(Config.TLS_SSL_ENDPOINT_IDENTIFICATION_ALGORITHM));
         }
 
-        this.adminClient = AdminClient.create(adminClientProps);
+        this.adminClient = AdminClient.create(kafkaClientProps);
         LOGGER.debug("Using AdminClient {}", adminClient);
         this.kafka = new KafkaImpl(adminClient, vertx);
         LOGGER.debug("Using Kafka {}", kafka);
@@ -159,6 +173,9 @@ public class Session extends AbstractVerticle {
         LOGGER.debug("Using namespace {}", namespace);
         this.k8s = new K8sImpl(vertx, kubeClient, labels, namespace);
         LOGGER.debug("Using k8s {}", k8s);
+
+        String clientId = config.get(Config.CLIENT_ID);
+        LOGGER.debug("Using client-Id {}", clientId);
 
         Zk.create(vertx, config.get(Config.ZOOKEEPER_CONNECT),
                 this.config.get(Config.ZOOKEEPER_SESSION_TIMEOUT_MS).intValue(),
@@ -172,7 +189,33 @@ public class Session extends AbstractVerticle {
                 LOGGER.debug("Using ZooKeeper {}", zk);
 
                 String topicsPath = config.get(Config.TOPICS_PATH);
-                ZkTopicStore topicStore = new ZkTopicStore(zk, topicsPath);
+                TopicStore topicStore;
+                if (config.get(Config.USE_ZOOKEEPER_TOPIC_STORE)) {
+                    topicStore = new ZkTopicStore(zk, topicsPath);
+                } else {
+                    boolean exists = zk.getPathExists(topicsPath);
+                    CompletionStage<KafkaStreamsTopicStoreService> cs;
+                    if (exists) {
+                        cs = Zk2KafkaStreams.upgrade(zk, config, kafkaClientProps, false);
+                    } else {
+                        KafkaStreamsTopicStoreService ksc = new KafkaStreamsTopicStoreService();
+                        cs = ksc.start(config, kafkaClientProps).thenCompose(s -> CompletableFuture.completedFuture(ksc));
+                    }
+                    topicStore = ConcurrentUtil.result(
+                            cs.handle((s, t) -> {
+                                if (t != null) {
+                                    LOGGER.error("Failed to create topic store.", t);
+                                    start.fail(t);
+                                    return null; // [1]
+                                } else {
+                                    service = s;
+                                    return s.store;
+                                }
+                            }));
+                    if (topicStore == null) {
+                        return; // [1]
+                    }
+                }
 
                 LOGGER.debug("Using TopicStore {}", topicStore);
 
@@ -187,37 +230,26 @@ public class Session extends AbstractVerticle {
                 LOGGER.debug("Using TopicsWatcher {}", topicsWatcher);
                 topicsWatcher.start(zk);
 
-                Promise<Void> promise = Promise.promise();
                 Promise<Void> initReconcilePromise = Promise.promise();
-                K8sTopicWatcher watcher = new K8sTopicWatcher(topicOperator, initReconcilePromise.future());
-                Thread resourceThread = new Thread(() -> {
-                    try {
-                        LOGGER.debug("Watching KafkaTopics matching {}", labels.labels());
 
-                        Session.this.topicWatch = kubeClient.customResources(Crds.kafkaTopic(), KafkaTopic.class, KafkaTopicList.class, DoneableKafkaTopic.class)
-                                .inNamespace(namespace).withLabels(labels.labels()).watch(watcher);
-                        LOGGER.debug("Watching setup");
-
-                        // start the HTTP server for healthchecks
-                        healthServer = this.startHealthServer();
-                        promise.complete();
-                    } catch (Throwable t) {
-                        promise.fail(t);
-                    }
-
-                }, "resource-watcher");
-                LOGGER.debug("Starting {}", resourceThread);
-                resourceThread.start();
+                watcher = new K8sTopicWatcher(topicOperator, initReconcilePromise.future(), this::startWatcher);
+                LOGGER.debug("Starting watcher");
+                startWatcher().compose(
+                    ignored -> {
+                        LOGGER.debug("Starting health server");
+                        Session.this.healthServer = startHealthServer();
+                        return Future.<Void>succeededFuture();
+                    }).onComplete(start);
 
                 final Long interval = config.get(Config.FULL_RECONCILIATION_INTERVAL_MS);
-                Handler<Long> periodic = new Handler<Long>() {
+                Handler<Long> periodic = new Handler<>() {
                     @Override
                     public void handle(Long oldTimerId) {
                         if (!stopped) {
                             timerId = null;
                             boolean isInitialReconcile = oldTimerId == null;
+                            topicOperator.getPeriodicReconciliationsCounter().increment();
                             topicOperator.reconcileAllTopics(isInitialReconcile ? "initial " : "periodic ").onComplete(result -> {
-                                topicOperator.getPeriodicReconciliationsCounter().increment();
                                 if (isInitialReconcile) {
                                     initReconcilePromise.complete();
                                 }
@@ -229,9 +261,23 @@ public class Session extends AbstractVerticle {
                     }
                 };
                 periodic.handle(null);
-                promise.future().onComplete(start);
                 LOGGER.info("Started");
             });
+    }
+
+    Future<Void> startWatcher() {
+        Promise<Void> promise = Promise.promise();
+        try {
+            LOGGER.debug("Watching KafkaTopics matching {}", config.get(Config.LABELS).labels());
+
+            Session.this.topicWatch = kubeClient.customResources(CustomResourceDefinitionContext.fromCrd(Crds.kafkaTopic()), KafkaTopic.class, KafkaTopicList.class)
+                    .inNamespace(config.get(Config.NAMESPACE)).withLabels(config.get(Config.LABELS).labels()).watch(watcher);
+            LOGGER.debug("Watching setup");
+            promise.complete();
+        } catch (Throwable t) {
+            promise.fail(t);
+        }
+        return promise.future();
     }
 
     /**

@@ -131,14 +131,14 @@ public class Main {
                 new KafkaBridgeAssemblyOperator(vertx, pfa, certManager, passwordGenerator, resourceOperatorSupplier, config);
 
         KafkaRebalanceAssemblyOperator kafkaRebalanceAssemblyOperator =
-                new KafkaRebalanceAssemblyOperator(vertx, pfa, resourceOperatorSupplier);
+                new KafkaRebalanceAssemblyOperator(vertx, pfa, resourceOperatorSupplier, config);
 
         List<Future> futures = new ArrayList<>(config.getNamespaces().size());
         for (String namespace : config.getNamespaces()) {
             Promise<String> prom = Promise.promise();
             futures.add(prom.future());
             ClusterOperator operator = new ClusterOperator(namespace,
-                    config.getReconciliationIntervalMs(),
+                    config,
                     client,
                     kafkaClusterOperations,
                     kafkaConnectClusterOperations,
@@ -151,7 +151,7 @@ public class Main {
             vertx.deployVerticle(operator,
                 res -> {
                     if (res.succeeded()) {
-                        log.info("Cluster Operator verticle started in namespace {}", namespace);
+                        log.info("Cluster Operator verticle started in namespace {} with label selector {}", namespace, config.getCustomResourceSelector());
                     } else {
                         log.error("Cluster Operator verticle in namespace {} failed to start", namespace, res.cause());
                         System.exit(1);
@@ -165,7 +165,7 @@ public class Main {
     /*test*/ static Future<Void> maybeCreateClusterRoles(Vertx vertx, ClusterOperatorConfig config, KubernetesClient client)  {
         if (config.isCreateClusterRoles()) {
             List<Future> futures = new ArrayList<>();
-            ClusterRoleOperator cro = new ClusterRoleOperator(vertx, client, config.getOperationTimeoutMs());
+            ClusterRoleOperator cro = new ClusterRoleOperator(vertx, client);
 
             Map<String, String> clusterRoles = new HashMap<String, String>() {
                 {
@@ -174,6 +174,7 @@ public class Main {
                     put("strimzi-kafka-broker", "030-ClusterRole-strimzi-kafka-broker.yaml");
                     put("strimzi-entity-operator", "031-ClusterRole-strimzi-entity-operator.yaml");
                     put("strimzi-topic-operator", "032-ClusterRole-strimzi-topic-operator.yaml");
+                    put("strimzi-kafka-client", "033-ClusterRole-strimzi-kafka-client.yaml");
                 }
             };
 

@@ -164,7 +164,7 @@ public class EntityTopicOperatorTest {
         EntityTopicOperator entityTopicOperator = EntityTopicOperator.fromCrd(resource);
 
         assertThat(entityTopicOperator.getWatchedNamespace(), is(namespace));
-        assertThat(entityTopicOperator.getImage(), is("strimzi/operator:latest"));
+        assertThat(entityTopicOperator.getImage(), is("quay.io/strimzi/operator:latest"));
         assertThat(entityTopicOperator.getReconciliationIntervalMs(), is(EntityTopicOperatorSpec.DEFAULT_FULL_RECONCILIATION_INTERVAL_SECONDS * 1000));
         assertThat(entityTopicOperator.getZookeeperSessionTimeoutMs(), is(EntityTopicOperatorSpec.DEFAULT_ZOOKEEPER_SESSION_TIMEOUT_SECONDS * 1000));
         assertThat(entityTopicOperator.getTopicMetadataMaxAttempts(), is(EntityTopicOperatorSpec.DEFAULT_TOPIC_METADATA_MAX_ATTEMPTS));
@@ -216,17 +216,34 @@ public class EntityTopicOperatorTest {
         assertThat(container.getPorts().get(0).getContainerPort(), is(Integer.valueOf(EntityTopicOperator.HEALTHCHECK_PORT)));
         assertThat(container.getPorts().get(0).getName(), is(EntityTopicOperator.HEALTHCHECK_PORT_NAME));
         assertThat(container.getPorts().get(0).getProtocol(), is("TCP"));
-        assertThat(EntityOperatorTest.volumeMounts(container.getVolumeMounts()), is(
-                map("entity-topic-operator-metrics-and-logging", "/opt/topic-operator/custom-config/",
+        assertThat(EntityOperatorTest.volumeMounts(container.getVolumeMounts()), is(map(
+                EntityTopicOperator.TOPIC_OPERATOR_TMP_DIRECTORY_DEFAULT_VOLUME_NAME, AbstractModel.STRIMZI_TMP_DIRECTORY_DEFAULT_MOUNT_PATH,
+                "entity-topic-operator-metrics-and-logging", "/opt/topic-operator/custom-config/",
                 EntityOperator.TLS_SIDECAR_CA_CERTS_VOLUME_NAME, EntityOperator.TLS_SIDECAR_CA_CERTS_VOLUME_MOUNT,
                 EntityOperator.TLS_SIDECAR_EO_CERTS_VOLUME_NAME, EntityOperator.TLS_SIDECAR_EO_CERTS_VOLUME_MOUNT)));
     }
 
     @Test
-    public void testRoleBinding()   {
-        RoleBinding binding = entityTopicOperator.generateRoleBinding(namespace, toWatchedNamespace);
+    public void testRoleBindingInOtherNamespace()   {
+        RoleBinding binding = entityTopicOperator.generateRoleBindingForRole(namespace, toWatchedNamespace);
 
         assertThat(binding.getSubjects().get(0).getNamespace(), is(namespace));
         assertThat(binding.getMetadata().getNamespace(), is(toWatchedNamespace));
+        assertThat(binding.getMetadata().getOwnerReferences().size(), is(0));
+
+        assertThat(binding.getRoleRef().getKind(), is("Role"));
+        assertThat(binding.getRoleRef().getName(), is("foo-entity-operator"));
+    }
+
+    @Test
+    public void testRoleBindingInTheSameNamespace()   {
+        RoleBinding binding = entityTopicOperator.generateRoleBindingForRole(namespace, namespace);
+
+        assertThat(binding.getSubjects().get(0).getNamespace(), is(namespace));
+        assertThat(binding.getMetadata().getNamespace(), is(namespace));
+        assertThat(binding.getMetadata().getOwnerReferences().size(), is(1));
+
+        assertThat(binding.getRoleRef().getKind(), is("Role"));
+        assertThat(binding.getRoleRef().getName(), is("foo-entity-operator"));
     }
 }

@@ -5,7 +5,7 @@
     <parent>
         <artifactId>strimzi</artifactId>
         <groupId>io.strimzi</groupId>
-        <version>0.21.0-SNAPSHOT</version>
+        <version>0.23.0-SNAPSHOT</version>
     </parent>
     <modelVersion>4.0.0</modelVersion>
     <artifactId>systemtest</artifactId>
@@ -39,6 +39,10 @@
             <artifactId>log4j-api</artifactId>
         </dependency>
         <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-core</artifactId>
+        </dependency>
+        <dependency>
             <groupId>io.strimzi</groupId>
             <artifactId>test</artifactId>
             <scope>compile</scope>
@@ -47,10 +51,6 @@
             <groupId>io.fabric8</groupId>
             <artifactId>kubernetes-client</artifactId>
             <scope>compile</scope>
-        </dependency>
-        <dependency>
-            <groupId>io.fabric8</groupId>
-            <artifactId>kubernetes-model-extensions</artifactId>
         </dependency>
         <dependency>
             <groupId>io.fabric8</groupId>
@@ -132,12 +132,6 @@
             <scope>compile</scope>
         </dependency>
         <dependency>
-            <groupId>javax.json</groupId>
-            <artifactId>javax.json-api</artifactId>
-            <version>${javax.json-api.version}</version>
-            <scope>compile</scope>
-        </dependency>
-        <dependency>
             <groupId>org.glassfish</groupId>
             <artifactId>javax.json</artifactId>
             <version>${javax.json.version}</version>
@@ -163,7 +157,7 @@
         <dependency>
             <groupId>io.rest-assured</groupId>
             <artifactId>json-path</artifactId>
-            <version>${json-path.version}</version>
+            <version>${rest-assured-json-path.version}</version>
             <scope>compile</scope>
         </dependency>
         <dependency>
@@ -223,6 +217,16 @@
         <dependency>
             <groupId>io.strimzi</groupId>
             <artifactId>config-model</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.bouncycastle</groupId>
+            <artifactId>bcpkix-jdk15on</artifactId>
+            <version>${bouncycastle.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.bouncycastle</groupId>
+            <artifactId>bcprov-jdk15on</artifactId>
+            <version>${bouncycastle.version}</version>
         </dependency>
     </dependencies>
 

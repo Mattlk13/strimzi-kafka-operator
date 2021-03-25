@@ -17,7 +17,6 @@ import io.fabric8.kubernetes.api.model.apps.StatefulSet;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.strimzi.api.kafka.Crds;
 import io.strimzi.api.kafka.KafkaList;
-import io.strimzi.api.kafka.model.DoneableKafka;
 import io.strimzi.api.kafka.model.Kafka;
 import io.strimzi.api.kafka.model.KafkaBuilder;
 import io.strimzi.api.kafka.model.KafkaResources;
@@ -61,7 +60,7 @@ import static org.mockito.Mockito.mock;
 
 @ExtendWith(VertxExtension.class)
 public class KafkaAssemblyOperatorCustomCertTest {
-    private final KubernetesVersion kubernetesVersion = KubernetesVersion.V1_11;
+    private final KubernetesVersion kubernetesVersion = KubernetesVersion.V1_18;
     private final MockCertManager certManager = new MockCertManager();
     private final PasswordGenerator passwordGenerator = new PasswordGenerator(10, "a", "a");
     private final ClusterOperatorConfig config = ResourceUtils.dummyClusterOperatorConfig(VERSIONS);
@@ -116,20 +115,22 @@ public class KafkaAssemblyOperatorCustomCertTest {
         kafka = createKafka();
 
         client = new MockKube()
-                .withCustomResourceDefinition(Crds.kafka(), Kafka.class, KafkaList.class, DoneableKafka.class).end()
+                .withCustomResourceDefinition(Crds.kafka(), Kafka.class, KafkaList.class).end()
                 .build();
         Crds.kafkaOperation(client).inNamespace(namespace).create(kafka);
         client.secrets().inNamespace(namespace).create(getTlsSecret());
         client.secrets().inNamespace(namespace).create(getExternalSecret());
-        client.secrets().inNamespace(namespace).createNew().withNewMetadata()
+        Secret secret = new SecretBuilder()
+            .withNewMetadata()
                 .withNamespace(namespace)
                 .withName("testkafka-cluster-operator-certs")
-                .endMetadata()
-                .addToData("foo", "bar")
-                .done();
+            .endMetadata()
+            .addToData("foo", "bar")
+            .build();
+        client.secrets().inNamespace(namespace).create(secret);
         ResourceOperatorSupplier supplier = new ResourceOperatorSupplier(vertx, client, mock(ZookeeperLeaderFinder.class),
                 mock(AdminClientProvider.class), mock(ZookeeperScalerProvider.class),
-                mock(MetricsProvider.class), new PlatformFeaturesAvailability(false, KubernetesVersion.V1_14), 10000);
+                mock(MetricsProvider.class), new PlatformFeaturesAvailability(false, KubernetesVersion.V1_20), 10000);
         operator = new MockKafkaAssemblyOperator(vertx, new PlatformFeaturesAvailability(false, kubernetesVersion),
                 certManager,
                 passwordGenerator,

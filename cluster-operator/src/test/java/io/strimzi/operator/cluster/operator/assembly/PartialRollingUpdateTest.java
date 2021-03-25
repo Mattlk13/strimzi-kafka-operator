@@ -12,7 +12,6 @@ import io.fabric8.kubernetes.api.model.apps.StatefulSet;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.strimzi.api.kafka.Crds;
 import io.strimzi.api.kafka.KafkaList;
-import io.strimzi.api.kafka.model.DoneableKafka;
 import io.strimzi.api.kafka.model.Kafka;
 import io.strimzi.api.kafka.model.KafkaBuilder;
 import io.strimzi.api.kafka.model.KafkaResources;
@@ -50,7 +49,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 import static io.strimzi.test.TestUtils.set;
-import static java.util.Collections.emptyMap;
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.MatcherAssert.assertThat;
 
@@ -120,7 +118,7 @@ public class PartialRollingUpdateTest {
                             .withStorageClass("foo")
                             .withDeleteClaim(true)
                         .endPersistentClaimStorage()
-                        .withMetrics(emptyMap())
+                        .withMetrics(Collections.emptyMap())
                     .endKafka()
                     .withNewZookeeper()
                         .withReplicas(3)
@@ -129,7 +127,7 @@ public class PartialRollingUpdateTest {
                             .withStorageClass("foo")
                             .withDeleteClaim(true)
                         .endPersistentClaimStorage()
-                        .withMetrics(emptyMap())
+                        .withMetrics(Collections.emptyMap())
                     .endZookeeper()
                     .withNewTopicOperator()
                     .endTopicOperator()
@@ -139,13 +137,13 @@ public class PartialRollingUpdateTest {
         CustomResourceDefinition kafkaAssemblyCrd = Crds.kafka();
 
         KubernetesClient bootstrapClient = new MockKube()
-                .withCustomResourceDefinition(kafkaAssemblyCrd, Kafka.class, KafkaList.class, DoneableKafka.class)
+                .withCustomResourceDefinition(kafkaAssemblyCrd, Kafka.class, KafkaList.class)
                 .withInitialInstances(Collections.singleton(cluster))
                 .end()
                 .build();
 
         ResourceOperatorSupplier supplier = supplier(bootstrapClient);
-        KafkaAssemblyOperator kco = new KafkaAssemblyOperator(vertx, new PlatformFeaturesAvailability(true, KubernetesVersion.V1_9),
+        KafkaAssemblyOperator kco = new KafkaAssemblyOperator(vertx, new PlatformFeaturesAvailability(true, KubernetesVersion.V1_16),
                 new MockCertManager(), new PasswordGenerator(10, "a", "a"), supplier, ResourceUtils.dummyClusterOperatorConfig(VERSIONS, 2_000));
 
         LOGGER.info("bootstrap reconciliation");
@@ -181,7 +179,7 @@ public class PartialRollingUpdateTest {
         return new ResourceOperatorSupplier(vertx, bootstrapClient,
                 ResourceUtils.zookeeperLeaderFinder(vertx, bootstrapClient),
                 ResourceUtils.adminClientProvider(), ResourceUtils.zookeeperScalerProvider(),
-                ResourceUtils.metricsProvider(), new PlatformFeaturesAvailability(true, KubernetesVersion.V1_9),
+                ResourceUtils.metricsProvider(), new PlatformFeaturesAvailability(true, KubernetesVersion.V1_16),
                 60_000L);
     }
 
@@ -189,7 +187,7 @@ public class PartialRollingUpdateTest {
         CustomResourceDefinition kafkaAssemblyCrd = Crds.kafka();
 
         this.mockClient = new MockKube()
-                .withCustomResourceDefinition(kafkaAssemblyCrd, Kafka.class, KafkaList.class, DoneableKafka.class)
+                .withCustomResourceDefinition(kafkaAssemblyCrd, Kafka.class, KafkaList.class)
                 .withInitialInstances(Collections.singleton(cluster))
                 .end()
                 .withInitialStatefulSets(set(zkSts, kafkaSts))
@@ -199,7 +197,7 @@ public class PartialRollingUpdateTest {
 
         ResourceOperatorSupplier supplier = supplier(mockClient);
 
-        this.kco = new KafkaAssemblyOperator(vertx, new PlatformFeaturesAvailability(true, KubernetesVersion.V1_9),
+        this.kco = new KafkaAssemblyOperator(vertx, new PlatformFeaturesAvailability(true, KubernetesVersion.V1_16),
                 new MockCertManager(), new PasswordGenerator(10, "a", "a"), supplier, ResourceUtils.dummyClusterOperatorConfig(VERSIONS, 2_000));
         LOGGER.info("Started test KafkaAssemblyOperator");
     }

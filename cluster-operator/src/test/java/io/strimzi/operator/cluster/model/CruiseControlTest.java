@@ -6,6 +6,7 @@ package io.strimzi.operator.cluster.model;
 
 import io.fabric8.kubernetes.api.model.Affinity;
 import io.fabric8.kubernetes.api.model.AffinityBuilder;
+import io.fabric8.kubernetes.api.model.ConfigMapKeySelectorBuilder;
 import io.fabric8.kubernetes.api.model.Container;
 import io.fabric8.kubernetes.api.model.EnvVar;
 import io.fabric8.kubernetes.api.model.EnvVarBuilder;
@@ -24,18 +25,21 @@ import io.fabric8.kubernetes.api.model.TolerationBuilder;
 import io.fabric8.kubernetes.api.model.Volume;
 import io.fabric8.kubernetes.api.model.VolumeMount;
 import io.fabric8.kubernetes.api.model.apps.Deployment;
-import io.fabric8.kubernetes.api.model.networking.NetworkPolicy;
-import io.fabric8.kubernetes.api.model.networking.NetworkPolicyIngressRule;
-import io.fabric8.kubernetes.api.model.networking.NetworkPolicyPeer;
-import io.fabric8.kubernetes.api.model.networking.NetworkPolicyPeerBuilder;
+import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicy;
+import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicyIngressRule;
+import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicyPeer;
+import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicyPeerBuilder;
 import io.fabric8.kubernetes.api.model.policy.PodDisruptionBudget;
 import io.strimzi.api.kafka.model.ContainerEnvVar;
 import io.strimzi.api.kafka.model.CruiseControlResources;
 import io.strimzi.api.kafka.model.CruiseControlSpec;
 import io.strimzi.api.kafka.model.CruiseControlSpecBuilder;
 import io.strimzi.api.kafka.model.InlineLogging;
+import io.strimzi.api.kafka.model.JmxPrometheusExporterMetrics;
+import io.strimzi.api.kafka.model.JmxPrometheusExporterMetricsBuilder;
 import io.strimzi.api.kafka.model.Kafka;
 import io.strimzi.api.kafka.model.KafkaBuilder;
+import io.strimzi.api.kafka.model.MetricsConfig;
 import io.strimzi.api.kafka.model.balancing.BrokerCapacity;
 import io.strimzi.api.kafka.model.storage.EphemeralStorage;
 import io.strimzi.api.kafka.model.storage.JbodStorage;
@@ -81,7 +85,10 @@ import static org.hamcrest.Matchers.hasItems;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-@SuppressWarnings("checkstyle:ClassDataAbstractionCoupling")
+@SuppressWarnings({
+        "checkstyle:ClassDataAbstractionCoupling",
+        "checkstyle:ClassFanOutComplexity"
+})
 public class CruiseControlTest {
     private final String namespace = "test";
     private final String cluster = "foo";
@@ -91,6 +98,9 @@ public class CruiseControlTest {
     private final int healthTimeout = 30;
     private final String minInsyncReplicas = "2";
     private final Map<String, Object> metricsCm = singletonMap("animal", "wombat");
+    private final String metricsCMName = "metrics-cm";
+    private final JmxPrometheusExporterMetrics jmxMetricsConfig = io.strimzi.operator.cluster.TestUtils.getJmxPrometheusExporterMetrics(AbstractModel.ANCILLARY_CM_KEY_METRICS, metricsCMName);
+
     private final Map<String, Object> kafkaConfig = singletonMap(CruiseControl.MIN_INSYNC_REPLICAS, minInsyncReplicas);
     private final Map<String, Object> zooConfig = singletonMap("foo", "bar");
 
@@ -270,7 +280,7 @@ public class CruiseControlTest {
 
         // Test volumes
         List<Volume> volumes = dep.getSpec().getTemplate().getSpec().getVolumes();
-        assertThat(volumes.size(), is(3));
+        assertThat(volumes.size(), is(5));
 
         Volume volume = volumes.stream().filter(vol -> CruiseControl.TLS_SIDECAR_CC_CERTS_VOLUME_NAME.equals(vol.getName())).findFirst().get();
         assertThat(volume, is(notNullValue()));
@@ -284,9 +294,18 @@ public class CruiseControlTest {
         assertThat(volume, is(notNullValue()));
         assertThat(volume.getConfigMap().getName(), is(CruiseControl.metricAndLogConfigsName(cluster)));
 
+        volume = volumes.stream().filter(vol -> AbstractModel.STRIMZI_TMP_DIRECTORY_DEFAULT_VOLUME_NAME.equals(vol.getName())).findFirst().get();
+        assertThat(volume, is(notNullValue()));
+        assertThat(volume.getEmptyDir().getMedium(), is("Memory"));
+
+        volume = volumes.stream().filter(vol -> CruiseControl.TLS_SIDECAR_TMP_DIRECTORY_DEFAULT_VOLUME_NAME.equals(vol.getName())).findFirst().get();
+        assertThat(volume, is(notNullValue()));
+        assertThat(volume.getEmptyDir().getMedium(), is("Memory"));
+
         // Test volume mounts
+        // TLS sidecar container
         List<VolumeMount> volumesMounts = dep.getSpec().getTemplate().getSpec().getContainers().get(0).getVolumeMounts();
-        assertThat(volumesMounts.size(), is(3));
+        assertThat(volumesMounts.size(), is(4));
 
         VolumeMount volumeMount = volumesMounts.stream().filter(vol -> CruiseControl.TLS_SIDECAR_CC_CERTS_VOLUME_NAME.equals(vol.getName())).findFirst().get();
         assertThat(volumeMount, is(notNullValue()));
@@ -299,6 +318,26 @@ public class CruiseControlTest {
         volumeMount = volumesMounts.stream().filter(vol -> CruiseControl.LOG_AND_METRICS_CONFIG_VOLUME_NAME.equals(vol.getName())).findFirst().get();
         assertThat(volumeMount, is(notNullValue()));
         assertThat(volumeMount.getMountPath(), is(CruiseControl.LOG_AND_METRICS_CONFIG_VOLUME_MOUNT));
+
+        volumeMount = volumesMounts.stream().filter(vol -> AbstractModel.STRIMZI_TMP_DIRECTORY_DEFAULT_VOLUME_NAME.equals(vol.getName())).findFirst().get();
+        assertThat(volumeMount, is(notNullValue()));
+        assertThat(volumeMount.getMountPath(), is(AbstractModel.STRIMZI_TMP_DIRECTORY_DEFAULT_MOUNT_PATH));
+
+        // CC container
+        volumesMounts = dep.getSpec().getTemplate().getSpec().getContainers().get(1).getVolumeMounts();
+        assertThat(volumesMounts.size(), is(3));
+
+        volumeMount = volumesMounts.stream().filter(vol -> CruiseControl.TLS_SIDECAR_CC_CERTS_VOLUME_NAME.equals(vol.getName())).findFirst().get();
+        assertThat(volumeMount, is(notNullValue()));
+        assertThat(volumeMount.getMountPath(), is(CruiseControl.TLS_SIDECAR_CC_CERTS_VOLUME_MOUNT));
+
+        volumeMount = volumesMounts.stream().filter(vol -> CruiseControl.TLS_SIDECAR_CA_CERTS_VOLUME_NAME.equals(vol.getName())).findFirst().get();
+        assertThat(volumeMount, is(notNullValue()));
+        assertThat(volumeMount.getMountPath(), is(CruiseControl.TLS_SIDECAR_CA_CERTS_VOLUME_MOUNT));
+
+        volumeMount = volumesMounts.stream().filter(vol -> CruiseControl.TLS_SIDECAR_TMP_DIRECTORY_DEFAULT_VOLUME_NAME.equals(vol.getName())).findFirst().get();
+        assertThat(volumeMount, is(notNullValue()));
+        assertThat(volumeMount.getMountPath(), is(AbstractModel.STRIMZI_TMP_DIRECTORY_DEFAULT_MOUNT_PATH));
     }
 
     @Test
@@ -343,7 +382,7 @@ public class CruiseControlTest {
                 .build();
 
         Kafka resource = ResourceUtils.createKafka(namespace, cluster, replicas, image,
-                healthDelay, healthTimeout, metricsCm, kafkaConfig, zooConfig,
+                healthDelay, healthTimeout, metricsCm, jmxMetricsConfig, kafkaConfig, zooConfig,
                 kafkaStorage, zkStorage, kafkaLogJson, zooLogJson, null, cruiseControlSpec);
         CruiseControl cc = CruiseControl.fromCrd(resource, VERSIONS);
 
@@ -377,7 +416,7 @@ public class CruiseControlTest {
                 .build();
 
         Kafka resource = ResourceUtils.createKafka(namespace, cluster, replicas, image,
-                healthDelay, healthTimeout, metricsCm, kafkaConfig, zooConfig,
+                healthDelay, healthTimeout, metricsCm, jmxMetricsConfig, kafkaConfig, zooConfig,
                 kafkaStorage, zkStorage, kafkaLogJson, zooLogJson, null, cruiseControlSpec);
         CruiseControl cc = CruiseControl.fromCrd(resource, VERSIONS);
 
@@ -390,7 +429,7 @@ public class CruiseControlTest {
     @Test
     public void testCruiseControlNotDeployed() {
         Kafka resource = ResourceUtils.createKafka(namespace, cluster, replicas, image,
-                healthDelay, healthTimeout, metricsCm, kafkaConfig, zooConfig,
+                healthDelay, healthTimeout, metricsCm, jmxMetricsConfig, kafkaConfig, zooConfig,
                 kafkaStorage, zkStorage, kafkaLogJson, zooLogJson, null,  null);
         CruiseControl cc = CruiseControl.fromCrd(resource, VERSIONS);
 
@@ -421,7 +460,7 @@ public class CruiseControlTest {
     @Test
     public void testGenerateServiceWhenDisabled()   {
         Kafka resource = ResourceUtils.createKafka(namespace, cluster, replicas, image,
-                healthDelay, healthTimeout, metricsCm, kafkaConfig, zooConfig,
+                healthDelay, healthTimeout, metricsCm, jmxMetricsConfig, kafkaConfig, zooConfig,
                 kafkaStorage, zkStorage, kafkaLogJson, zooLogJson, null, null);
         CruiseControl cc = CruiseControl.fromCrd(resource, VERSIONS);
 
@@ -761,7 +800,7 @@ public class CruiseControlTest {
                 .withNewNamespaceSelector().endNamespaceSelector()
                 .build();
 
-        NetworkPolicy np = cc.generateNetworkPolicy(true);
+        NetworkPolicy np = cc.generateNetworkPolicy("operator-namespace", null);
 
         assertThat(np.getSpec().getIngress().stream().filter(ing -> ing.getPorts().get(0).getPort().equals(new IntOrString(CruiseControl.REST_API_PORT))).findFirst().orElse(null), is(notNullValue()));
 
@@ -771,6 +810,44 @@ public class CruiseControlTest {
         assertThat(rules.contains(clusterOperatorPeer), is(true));
     }
 
+    @Test
+    public void testRestApiPortNetworkPolicyInTheSameNamespace() {
+        NetworkPolicyPeer clusterOperatorPeer = new NetworkPolicyPeerBuilder()
+                .withNewPodSelector()
+                    .withMatchLabels(Collections.singletonMap(Labels.STRIMZI_KIND_LABEL, "cluster-operator"))
+                .endPodSelector()
+                .build();
+
+        NetworkPolicy np = cc.generateNetworkPolicy(namespace, null);
+
+        assertThat(np.getSpec().getIngress().stream().filter(ing -> ing.getPorts().get(0).getPort().equals(new IntOrString(CruiseControl.REST_API_PORT))).findFirst().orElse(null), is(notNullValue()));
+
+        List<NetworkPolicyPeer> rules = np.getSpec().getIngress().stream().filter(ing -> ing.getPorts().get(0).getPort().equals(new IntOrString(CruiseControl.REST_API_PORT))).map(NetworkPolicyIngressRule::getFrom).findFirst().orElse(null);
+
+        assertThat(rules.size(), is(1));
+        assertThat(rules.contains(clusterOperatorPeer), is(true));
+    }
+
+    @Test
+    public void testRestApiPortNetworkPolicyWithNamespaceLabels() {
+        NetworkPolicyPeer clusterOperatorPeer = new NetworkPolicyPeerBuilder()
+                .withNewPodSelector()
+                    .withMatchLabels(Collections.singletonMap(Labels.STRIMZI_KIND_LABEL, "cluster-operator"))
+                .endPodSelector()
+                .withNewNamespaceSelector()
+                    .withMatchLabels(Collections.singletonMap("nsLabelKey", "nsLabelValue"))
+                .endNamespaceSelector()
+                .build();
+
+        NetworkPolicy np = cc.generateNetworkPolicy(null, Labels.fromMap(Collections.singletonMap("nsLabelKey", "nsLabelValue")));
+
+        assertThat(np.getSpec().getIngress().stream().filter(ing -> ing.getPorts().get(0).getPort().equals(new IntOrString(CruiseControl.REST_API_PORT))).findFirst().orElse(null), is(notNullValue()));
+
+        List<NetworkPolicyPeer> rules = np.getSpec().getIngress().stream().filter(ing -> ing.getPorts().get(0).getPort().equals(new IntOrString(CruiseControl.REST_API_PORT))).map(NetworkPolicyIngressRule::getFrom).findFirst().orElse(null);
+
+        assertThat(rules.size(), is(1));
+        assertThat(rules.contains(clusterOperatorPeer), is(true));
+    }
 
     @Test
     public void testGoalsCheck() {
@@ -779,7 +856,7 @@ public class CruiseControlTest {
                 "com.linkedin.kafka.cruisecontrol.analyzer.goals.ReplicaCapacityGoal";
 
         Map<String, Object> customGoalConfig = (Map) configuration.asOrderedProperties().asMap();
-        customGoalConfig.put(CRUISE_CONTROL_DEFAULT_GOALS_CONFIG_KEY.getName(), customGoals);
+        customGoalConfig.put(CRUISE_CONTROL_DEFAULT_GOALS_CONFIG_KEY.getValue(), customGoals);
 
         CruiseControlSpec ccSpecWithCustomGoals = new CruiseControlSpecBuilder()
                 .withImage(ccImage)
@@ -801,9 +878,70 @@ public class CruiseControlTest {
 
         String anomalyDetectionGoals =  cruiseControlWithCustomGoals
                 .getConfiguration().asOrderedProperties().asMap()
-                .get(CRUISE_CONTROL_ANOMALY_DETECTION_CONFIG_KEY.getName());
+                .get(CRUISE_CONTROL_ANOMALY_DETECTION_CONFIG_KEY.getValue());
 
         assertThat(anomalyDetectionGoals, is(customGoals));
+    }
+
+    @Test
+    public void testMetricsParsingInline() {
+        Map<String, Object> dummyMetrics = singletonMap("dummy", "metrics");
+
+        Kafka kafkaAssembly = new KafkaBuilder(ResourceUtils.createKafka(namespace, cluster, replicas,
+                image, healthDelay, healthTimeout))
+                .editSpec()
+                    .withNewCruiseControl()
+                        .withMetrics(dummyMetrics)
+                    .endCruiseControl()
+                .endSpec()
+                .build();
+
+        CruiseControl cc = CruiseControl.fromCrd(kafkaAssembly, VERSIONS);
+
+        assertThat(cc.isMetricsEnabled(), is(true));
+        assertThat(cc.getMetricsConfig(), is(dummyMetrics.entrySet()));
+        assertThat(cc.getMetricsConfigInCm(), is(nullValue()));
+    }
+
+    @Test
+    public void testMetricsParsingFromConfigMap() {
+        MetricsConfig metrics = new JmxPrometheusExporterMetricsBuilder()
+                .withNewValueFrom()
+                    .withConfigMapKeyRef(new ConfigMapKeySelectorBuilder().withName("my-metrics-configuration").withKey("config.yaml").build())
+                .endValueFrom()
+                .build();
+
+        Kafka kafkaAssembly = new KafkaBuilder(ResourceUtils.createKafka(namespace, cluster, replicas,
+                image, healthDelay, healthTimeout))
+                .editSpec()
+                    .withNewCruiseControl()
+                        .withMetricsConfig(metrics)
+                    .endCruiseControl()
+                .endSpec()
+                .build();
+
+        CruiseControl cc = CruiseControl.fromCrd(kafkaAssembly, VERSIONS);
+
+        assertThat(cc.isMetricsEnabled(), is(true));
+        assertThat(cc.getMetricsConfigInCm(), is(metrics));
+        assertThat(cc.getMetricsConfig(), is(nullValue()));
+    }
+
+    @Test
+    public void testMetricsParsingNoMetrics() {
+        Kafka kafkaAssembly = new KafkaBuilder(ResourceUtils.createKafka(namespace, cluster, replicas,
+                image, healthDelay, healthTimeout))
+                .editSpec()
+                    .withNewCruiseControl()
+                    .endCruiseControl()
+                    .endSpec()
+                .build();
+
+        CruiseControl cc = CruiseControl.fromCrd(kafkaAssembly, VERSIONS);
+
+        assertThat(cc.isMetricsEnabled(), is(false));
+        assertThat(cc.getMetricsConfigInCm(), is(nullValue()));
+        assertThat(cc.getMetricsConfig(), is(nullValue()));
     }
 
     @AfterAll

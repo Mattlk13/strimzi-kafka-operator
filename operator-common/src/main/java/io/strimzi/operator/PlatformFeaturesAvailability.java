@@ -204,14 +204,6 @@ public class PlatformFeaturesAvailability {
         return this.hasRoutes();
     }
 
-    public boolean isNamespaceAndPodSelectorNetworkPolicySupported() {
-        if (isOpenshift()) {
-            return this.kubernetesVersion.compareTo(KubernetesVersion.V1_12) >= 0;
-        } else {
-            return this.kubernetesVersion.compareTo(KubernetesVersion.V1_11) >= 0;
-        }
-    }
-
     public KubernetesVersion getKubernetesVersion() {
         return this.kubernetesVersion;
     }
@@ -254,6 +246,15 @@ public class PlatformFeaturesAvailability {
 
     public boolean supportsS2I() {
         return hasBuilds() && hasApps() && hasImages();
+    }
+
+    /**
+     * Returns true when the Kubernetes cluster has V1 version of the Ingress resource (Kubernetes 1.19 and newer)
+     *
+     * @return True when Ingress V1 is supported. False otherwise.
+     */
+    public boolean hasIngressV1() {
+        return this.kubernetesVersion.compareTo(KubernetesVersion.V1_19) >= 0;
     }
 
     @Override

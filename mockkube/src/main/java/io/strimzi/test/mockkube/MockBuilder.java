@@ -4,8 +4,8 @@
  */
 package io.strimzi.test.mockkube;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.fabric8.kubernetes.api.model.DeletionPropagation;
-import io.fabric8.kubernetes.api.model.Doneable;
 import io.fabric8.kubernetes.api.model.HasMetadata;
 import io.fabric8.kubernetes.api.model.KubernetesResource;
 import io.fabric8.kubernetes.api.model.KubernetesResourceList;
@@ -23,7 +23,8 @@ import org.mockito.ArgumentMatchers;
 import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.OngoingStubbing;
 
-import java.lang.reflect.Constructor;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -32,8 +33,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
+import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
 
 import static java.util.Collections.emptyMap;
@@ -53,21 +56,19 @@ import static org.mockito.Mockito.when;
  *
  * @param <T> The resource type (e.g. Pod)
  * @param <L> The list type (e.g. PodList)
- * @param <D> The doneable type (e.g. DoneablePod)
  * @param <R> The resource type (e.g. Resource, or ScalableResource)
  */
 class MockBuilder<T extends HasMetadata,
         L extends KubernetesResource/*<T>*/ & KubernetesResourceList/*<T>*/,
-        D extends Doneable<T>,
-        R extends Resource<T, D>> {
+        R extends Resource<T>> {
 
     /**
      * This method is just used to appease javac and avoid having a very ugly "double cast" (cast to raw Class,
      * followed by a cast to parameterised Class) in all the calls to
-     * {@link MockBuilder#MockBuilder(Class, Class, Class, Class, Map)}
+     * {@link MockBuilder#MockBuilder(Class, Class, Class, Map)}
      */
     @SuppressWarnings("unchecked")
-    protected static <T extends HasMetadata, D extends Doneable<T>, R extends Resource<T, D>, R2 extends Resource> Class<R> castClass(Class<R2> c) {
+    protected static <T extends HasMetadata, R extends Resource<T>, R2 extends Resource> Class<R> castClass(Class<R2> c) {
         return (Class) c;
     }
 
@@ -75,7 +76,6 @@ class MockBuilder<T extends HasMetadata,
 
     protected final Class<T> resourceTypeClass;
     protected final Class<L> listClass;
-    protected final Class<D> doneableClass;
     protected final Class<R> resourceClass;
     /** In-memory database of resource name to resource instance */
     protected final Map<String, T> db;
@@ -93,17 +93,16 @@ class MockBuilder<T extends HasMetadata,
         assertNumWatchers(0);
     }
 
-    public MockBuilder(Class<T> resourceTypeClass, Class<L> listClass, Class<D> doneableClass,
+    public MockBuilder(Class<T> resourceTypeClass, Class<L> listClass,
                        Class<R> resourceClass, Map<String, T> db) {
         this.resourceTypeClass = resourceTypeClass;
         this.resourceType = resourceTypeClass.getSimpleName();
-        this.doneableClass = doneableClass;
         this.resourceClass = resourceClass;
         this.db = db;
         this.listClass = listClass;
     }
 
-    public MockBuilder<T, L, D, R> addObserver(Observer<T> observer) {
+    public MockBuilder<T, L, R> addObserver(Observer<T> observer) {
         if (observers == null) {
             observers = new ArrayList<>();
         }
@@ -115,12 +114,15 @@ class MockBuilder<T extends HasMetadata,
     protected T copyResource(T resource) {
         if (resource == null) {
             return null;
-        }
-        try {
-            D doneableInstance = doneableClass.getDeclaredConstructor(resourceTypeClass).newInstance(resource);
-            return (T) Doneable.class.getMethod("done").invoke(doneableInstance);
-        } catch (ReflectiveOperationException e) {
-            throw new RuntimeException(e);
+        } else {
+            ObjectMapper objectMapper = new ObjectMapper();
+            try {
+                ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                objectMapper.writeValue(baos, resource);
+                return (T) objectMapper.readValue(baos.toByteArray(), resource.getClass());
+            } catch (IOException e) {
+                return null;
+            }
         }
     }
 
@@ -129,13 +131,13 @@ class MockBuilder<T extends HasMetadata,
      * @return The mock
      */
     @SuppressWarnings("unchecked")
-    public MixedOperation<T, L, D, R> build() {
-        MixedOperation<T, L, D, R> mixed = mock(MixedOperation.class);
+    public MixedOperation<T, L, R> build() {
+        MixedOperation<T, L, R> mixed = mock(MixedOperation.class);
 
         when(mixed.inNamespace(any())).thenReturn(mixed);
         when(mixed.list()).thenAnswer(i -> mockList(p -> true));
         when(mixed.withLabels(any())).thenAnswer(i -> {
-            MixedOperation<T, L, D, R> mixedWithLabels = mock(MixedOperation.class);
+            MixedOperation<T, L, R> mixedWithLabels = mock(MixedOperation.class);
             Map<String, String> labels = i.getArgument(0);
             when(mixedWithLabels.list()).thenAnswer(i2 -> mockList(p -> {
                 Map<String, String> m = new HashMap(p.getMetadata().getLabels());
@@ -160,8 +162,7 @@ class MockBuilder<T extends HasMetadata,
             String resourceName = resource.getMetadata().getName();
             return doCreate(resourceName, resource);
         });
-        when(mixed.createNew()).thenReturn(doneable(mixed::create));
-        when(mixed.createOrReplace(any())).thenAnswer(i -> {
+        when(mixed.create()).thenAnswer(i -> {
             T resource = i.getArgument(0);
             String resourceName = resource.getMetadata().getName();
             if (db.containsKey(resourceName)) {
@@ -170,9 +171,13 @@ class MockBuilder<T extends HasMetadata,
                 return doCreate(resourceName, resource);
             }
         });
-        when(mixed.createOrReplaceWithNew()).thenAnswer(i -> {
+        when(mixed.createOrReplace()).thenAnswer(i -> {
             T resource = i.getArgument(0);
-            return doneable(resource, r -> mixed.withName(resource.getMetadata().getName()).createOrReplace(r));
+            return doCreate(resource.getMetadata().getName(), resource);
+        });
+        when(mixed.createOrReplace((T) any())).thenAnswer(i -> {
+            T resource = i.getArgument(0);
+            return doCreate(resource.getMetadata().getName(), resource);
         });
         when(mixed.delete(ArgumentMatchers.<T[]>any())).thenAnswer(i -> {
             T resource = i.getArgument(0);
@@ -208,31 +213,13 @@ class MockBuilder<T extends HasMetadata,
         return mixed;
     }
 
-    D doneable(io.fabric8.kubernetes.api.builder.Function<T, T> f) {
-        try {
-            Constructor<D> declaredConstructor = doneableClass.getDeclaredConstructor(io.fabric8.kubernetes.api.builder.Function.class);
-            return declaredConstructor.newInstance(f);
-        } catch (ReflectiveOperationException e) {
-            throw new RuntimeException(e);
-        }
-    }
-
-    D doneable(T instance, io.fabric8.kubernetes.api.builder.Function<T, T> f) {
-        try {
-            Constructor<D> declaredConstructor = doneableClass.getDeclaredConstructor(resourceTypeClass, io.fabric8.kubernetes.api.builder.Function.class);
-            return declaredConstructor.newInstance(instance, f);
-        } catch (ReflectiveOperationException e) {
-            throw new RuntimeException(e);
-        }
-    }
-
-    public MixedOperation<T, L, D, R> build2(Supplier<MixedOperation<T, L, D, R>> x) {
-        MixedOperation<T, L, D, R> build = build();
+    public MixedOperation<T, L, R> build2(Supplier<MixedOperation<T, L, R>> x) {
+        MixedOperation<T, L, R> build = build();
         when(x.get()).thenReturn(build);
         return build;
     }
 
-    MixedOperation<T, L, D, R> mockWithLabels(Map<String, String> labels) {
+    MixedOperation<T, L, R> mockWithLabels(Map<String, String> labels) {
         return mockWithLabelPredicate(p -> {
             Map<String, String> m = new HashMap<>(p.getMetadata().getLabels() == null ? emptyMap() : p.getMetadata().getLabels());
             m.keySet().retainAll(labels.keySet());
@@ -240,13 +227,13 @@ class MockBuilder<T extends HasMetadata,
         });
     }
 
-    MixedOperation<T, L, D, R> mockWithLabel(String label) {
+    MixedOperation<T, L, R> mockWithLabel(String label) {
         return mockWithLabelPredicate(p -> p.getMetadata().getLabels().containsKey(label));
     }
 
     @SuppressWarnings("unchecked")
-    MixedOperation<T, L, D, R> mockWithLabelPredicate(Predicate<T> predicate) {
-        MixedOperation<T, L, D, R> mixedWithLabels = mock(MixedOperation.class);
+    MixedOperation<T, L, R> mockWithLabelPredicate(Predicate<T> predicate) {
+        MixedOperation<T, L, R> mixedWithLabels = mock(MixedOperation.class);
         when(mixedWithLabels.list()).thenAnswer(i2 -> {
             return mockList(predicate);
         });
@@ -284,7 +271,7 @@ class MockBuilder<T extends HasMetadata,
         mockGet(resourceName, resource);
         mockWatch(resourceName, resource);
         mockCreate(resourceName, resource);
-        when(resource.createNew()).thenReturn(doneable(resource::create));
+        mockSetStatus(resourceName, resource);
         when(resource.createOrReplace(any())).thenAnswer(i -> {
             T resource2 = i.getArgument(0);
             if (db.containsKey(resourceName)) {
@@ -293,16 +280,19 @@ class MockBuilder<T extends HasMetadata,
                 return doCreate(resourceName, resource2);
             }
         });
-        when(resource.createOrReplaceWithNew()).thenAnswer(i -> {
-            T t = resource.get();
-            return doneable(t, resource::createOrReplace);
-        });
+
         when(resource.withGracePeriod(anyLong())).thenReturn(resource);
         mockWithPropagationPolicy(resource);
         mockPatch(resourceName, resource);
         when(resource.edit()).thenAnswer(i -> {
             T t = resource.get();
-            return doneable(t, instance -> doPatch(instance.getMetadata().getName(), resource, instance));
+            Function f = i.getArgument(0);
+            return doPatch(t.getMetadata().getName(), resource, (T) f.apply(t));
+        });
+        when(resource.edit(any(UnaryOperator.class))).thenAnswer(i -> {
+            T t = resource.get();
+            Function f = i.getArgument(0);
+            return doPatch(t.getMetadata().getName(), resource, (T) f.apply(t));
         });
         mockDelete(resourceName, resource);
         if (Readiness.isReadinessApplicable(resourceTypeClass)) {
@@ -466,6 +456,16 @@ class MockBuilder<T extends HasMetadata,
         return when(resource.isReady()).thenAnswer(i -> {
             LOGGER.debug("{} {} is ready", resourceType, resourceName);
             return Boolean.TRUE;
+        });
+    }
+
+    @SuppressWarnings("unchecked")
+    protected OngoingStubbing<T> mockSetStatus(String resourceName, R resource) {
+        return when(resource.updateStatus((T) any())).thenAnswer(i -> {
+            T r = i.getArgument(0);
+            updateStatus(r.getMetadata().getNamespace(), r.getMetadata().getName(), r);
+            LOGGER.debug("{} {} setStatus {}", resourceType, resourceName, r);
+            return copyResource(db.get(resourceName));
         });
     }
 

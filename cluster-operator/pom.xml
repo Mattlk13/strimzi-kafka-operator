@@ -4,7 +4,7 @@
     <parent>
         <groupId>io.strimzi</groupId>
         <artifactId>strimzi</artifactId>
-        <version>0.21.0-SNAPSHOT</version>
+        <version>0.23.0-SNAPSHOT</version>
     </parent>
     <modelVersion>4.0.0</modelVersion>
     <artifactId>cluster-operator</artifactId>
@@ -17,7 +17,7 @@
     </licenses>
 
     <properties>
-        <mockserver.version>5.10.0</mockserver.version>
+        <mockserver.version>5.11.1</mockserver.version>
     </properties>
 
     <dependencies>
@@ -40,10 +40,6 @@
         <dependency>
             <groupId>io.fabric8</groupId>
             <artifactId>kubernetes-client</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>io.fabric8</groupId>
-            <artifactId>kubernetes-model-extensions</artifactId>
         </dependency>
         <dependency>
             <groupId>io.fabric8</groupId>
@@ -139,6 +135,10 @@
         <dependency>
             <groupId>io.strimzi</groupId>
             <artifactId>kafka-oauth-server</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.strimzi</groupId>
+            <artifactId>kafka-oauth-server-plain</artifactId>
         </dependency>
         <dependency>
             <groupId>io.strimzi</groupId>

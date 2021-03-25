@@ -8,6 +8,7 @@ import io.fabric8.kubernetes.api.model.batch.Job;
 import io.strimzi.systemtest.AbstractST;
 import io.strimzi.systemtest.enums.DefaultNetworkPolicy;
 import io.strimzi.systemtest.keycloak.KeycloakInstance;
+import io.strimzi.systemtest.templates.kubernetes.NetworkPolicyTemplates;
 import io.strimzi.systemtest.utils.kubeUtils.controllers.JobUtils;
 import io.strimzi.systemtest.utils.kubeUtils.objects.SecretUtils;
 import io.strimzi.systemtest.utils.specific.KeycloakUtils;
@@ -15,12 +16,14 @@ import io.vertx.ext.web.client.WebClient;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
-import io.strimzi.systemtest.resources.KubernetesResource;
-import io.strimzi.systemtest.resources.ResourceManager;
+import org.junit.jupiter.api.extension.ExtensionContext;
 
 import java.util.Base64;
+import java.util.List;
+import java.util.stream.Collectors;
+import java.util.HashMap;
+import java.util.Map;
 
 import static io.strimzi.systemtest.Constants.OAUTH;
 import static io.strimzi.systemtest.Constants.REGRESSION;
@@ -34,6 +37,10 @@ public class OauthAbstractST extends AbstractST {
     protected static final Logger LOGGER = LogManager.getLogger(OauthAbstractST.class);
     protected static final String OAUTH_CLIENT_NAME = "hello-world-producer";
     protected static final String OAUTH_CLIENT_SECRET = "hello-world-producer-secret";
+    protected static final String OAUTH_CLIENT_AUDIENCE_PRODUCER = "kafka-audience-producer";
+    protected static final String OAUTH_CLIENT_AUDIENCE_CONSUMER = "kafka-audience-consumer";
+    protected static final String OAUTH_CLIENT_AUDIENCE_SECRET = "kafka-audience-secret";
+
     protected static final String OAUTH_KAFKA_CLIENT_NAME = "kafka-broker";
     protected static final String OAUTH_PRODUCER_NAME = "oauth-producer";
     protected static final String OAUTH_CONSUMER_NAME = "oauth-consumer";
@@ -51,31 +58,44 @@ public class OauthAbstractST extends AbstractST {
 
     protected KeycloakInstance keycloakInstance;
 
-    protected WebClient client;
+    public static Map<String, Object> connectorConfig;
+    static {
+        connectorConfig = new HashMap<>();
+        connectorConfig.put("config.storage.replication.factor", 1);
+        connectorConfig.put("offset.storage.replication.factor", 1);
+        connectorConfig.put("status.storage.replication.factor", 1);
+    }
 
-    @BeforeAll
-    void setup() throws Exception {
-        ResourceManager.setClassResources();
-        installClusterOperator(NAMESPACE);
-        KubernetesResource.applyDefaultNetworkPolicy(NAMESPACE, DefaultNetworkPolicy.DEFAULT_TO_ALLOW);
+    protected WebClient client;
+    
+    protected void setupCoAndKeycloak(ExtensionContext extensionContext, String namespace) {
+
+        installClusterOperator(extensionContext, namespace);
+        resourceManager.createResource(extensionContext, NetworkPolicyTemplates.applyDefaultNetworkPolicy(extensionContext, namespace, DefaultNetworkPolicy.DEFAULT_TO_ALLOW));
 
         LOGGER.info("Deploying keycloak...");
 
-        KeycloakUtils.deployKeycloak(NAMESPACE);
+        KeycloakUtils.deployKeycloak(extensionContext, namespace);
 
+        SecretUtils.waitForSecretReady("credential-example-keycloak");
         String passwordEncoded = kubeClient().getSecret("credential-example-keycloak").getData().get("ADMIN_PASSWORD");
         String password = new String(Base64.getDecoder().decode(passwordEncoded.getBytes()));
-        keycloakInstance = new KeycloakInstance("admin", password, NAMESPACE);
+        keycloakInstance = new KeycloakInstance("admin", password, namespace);
 
         createSecretsForDeployments();
     }
 
     @AfterEach
-    void tearDown() {
+    void tearDownEach(ExtensionContext extensionContext) throws Exception {
+        List<Job> clusterJobList = kubeClient().getJobList().getItems()
+            .stream()
+            .filter(
+                job -> job.getMetadata().getName().contains(mapWithClusterNames.get(extensionContext.getDisplayName())))
+            .collect(Collectors.toList());
 
-        for (Job job : kubeClient().getJobList().getItems()) {
+        for (Job job : clusterJobList) {
             LOGGER.info("Deleting {} job", job.getMetadata().getName());
-            JobUtils.deleteJobWithWait(NAMESPACE, job.getMetadata().getName());
+            JobUtils.deleteJobWithWait(job.getMetadata().getNamespace(), job.getMetadata().getName());
         }
     }
 
@@ -93,6 +113,7 @@ public class OauthAbstractST extends AbstractST {
         SecretUtils.createSecret(MIRROR_MAKER_OAUTH_SECRET, OAUTH_KEY, "a2Fma2EtbWlycm9yLW1ha2VyLXNlY3JldA==");
         SecretUtils.createSecret(MIRROR_MAKER_2_OAUTH_SECRET, OAUTH_KEY, "a2Fma2EtbWlycm9yLW1ha2VyLTItc2VjcmV0");
         SecretUtils.createSecret(BRIDGE_OAUTH_SECRET, OAUTH_KEY, "a2Fma2EtYnJpZGdlLXNlY3JldA==");
+        SecretUtils.createSecret(OAUTH_CLIENT_AUDIENCE_SECRET, OAUTH_KEY, "a2Fma2EtYXVkaWVuY2Utc2VjcmV0");
     }
 }
 

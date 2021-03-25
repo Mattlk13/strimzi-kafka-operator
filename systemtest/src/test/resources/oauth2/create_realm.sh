@@ -1,8 +1,14 @@
 #!/usr/bin/env bash
+set +x
 
 USERNAME=$1
 PASSWORD=$2
 URL=$3
+
+TOKEN_CURL_OUT=$(curl --insecure -X POST -d "client_id=admin-cli&client_secret=aGVsbG8td29ybGQtcHJvZHVjZXItc2VjcmV0&grant_type=password&username=$USERNAME&password=$PASSWORD" "https://$URL/auth/realms/master/protocol/openid-connect/token")
+echo "[INFO] TOKEN_CURL_OUT: ${TOKEN_CURL_OUT}\n"
+TOKEN=$(echo ${TOKEN_CURL_OUT} | awk -F '\"' '{print $4}')
+
 
 TOKEN=$(curl --insecure -X POST -d "client_id=admin-cli&client_secret=aGVsbG8td29ybGQtcHJvZHVjZXItc2VjcmV0&grant_type=password&username=$USERNAME&password=$PASSWORD" "https://$URL/auth/realms/master/protocol/openid-connect/token" | awk -F '\"' '{print $4}')
 
@@ -124,6 +130,18 @@ RESULT=$(curl -v --insecure "https://$URL/auth/admin/realms" \
             "enabled": true,
             "email": "service-account-hello-world-streams@placeholder.org",
             "serviceAccountClientId": "hello-world-streams"
+        },
+        {
+            "username": "service-account-kafka-audience-producer",
+            "enabled": true,
+            "email": "service-account-kafka-audience-producer@placeholder.org",
+            "serviceAccountClientId": "kafka-audience-producer"
+        },
+        {
+            "username": "service-account-kafka-audience-consumer",
+            "enabled": true,
+            "email": "service-account-kafka-audience-consumer@placeholder.org",
+            "serviceAccountClientId": "kafka-audience-consumer"
         }
     ],
     "roles": {
@@ -215,9 +233,22 @@ RESULT=$(curl -v --insecure "https://$URL/auth/admin/realms" \
             "fullScopeAllowed": false,
             "attributes": {
                 "access.token.lifespan": "32140800"
-            }
-        },
-        {
+            },
+            "protocolMappers": [
+              {
+                "name": "audience for kafka-component",
+                "protocol": "openid-connect",
+                "protocolMapper": "oidc-audience-mapper",
+                "consentRequired": false,
+                "config": {
+                    "included.client.audience": "kafka-component",
+                    "id.token.claim": "false",
+                    "access.token.claim": "true"
+                }
+              }
+            ]
+          },
+          {
             "clientId": "kafka-producer",
             "enabled": true,
             "clientAuthenticatorType": "client-secret",
@@ -250,6 +281,66 @@ RESULT=$(curl -v --insecure "https://$URL/auth/admin/realms" \
             "attributes": {
                 "access.token.lifespan": "32140800"
             }
+        },
+        {
+            "clientId": "kafka-audience-producer",
+            "enabled": true,
+            "clientAuthenticatorType": "client-secret",
+            "secret": "kafka-audience-secret",
+            "publicClient": false,
+            "bearerOnly": false,
+            "standardFlowEnabled": false,
+            "implicitFlowEnabled": false,
+            "directAccessGrantsEnabled": true,
+            "serviceAccountsEnabled": true,
+            "consentRequired": false,
+            "fullScopeAllowed": false,
+            "attributes": {
+                "access.token.lifespan": "36000"
+            },
+            "protocolMappers": [
+              {
+                "name": "audience for kafka-component",
+                "protocol": "openid-connect",
+                "protocolMapper": "oidc-audience-mapper",
+                "consentRequired": false,
+                "config": {
+                    "included.client.audience": "kafka-component",
+                    "id.token.claim": "false",
+                    "access.token.claim": "true"
+                }
+              }
+            ]
+        },
+        {
+            "clientId": "kafka-audience-consumer",
+            "enabled": true,
+            "clientAuthenticatorType": "client-secret",
+            "secret": "kafka-audience-secret",
+            "publicClient": false,
+            "bearerOnly": false,
+            "standardFlowEnabled": false,
+            "implicitFlowEnabled": false,
+            "directAccessGrantsEnabled": true,
+            "serviceAccountsEnabled": true,
+            "consentRequired": false,
+            "fullScopeAllowed": false,
+            "attributes": {
+                "access.token.lifespan": "32140800"
+            },
+            "protocolMappers": [
+              {
+                "name": "audience for kafka-component",
+                "protocol": "openid-connect",
+                "protocolMapper": "oidc-audience-mapper",
+                "consentRequired": false,
+                "config": {
+                    "included.client.audience": "kafka-component",
+                    "id.token.claim": "false",
+                    "access.token.claim": "true"
+                }
+              }
+            ]
         },
         {
             "clientId": "hello-world-producer",
@@ -374,8 +465,10 @@ RESULT=$(curl -v --insecure "https://$URL/auth/admin/realms" \
 }')
 
 if [[ ${RESULT} != "" && ${RESULT} != *"Conflict detected"* ]]; then
-  echo "[ERROR] $(date -u +"%Y-%m-%d %H:%M:%S") Realm wasn't imported!"
+  echo "[ERROR] $(date -u +"%Y-%m-%d %H:%M:%S") Authentication realm wasn't imported!"
   exit 1
 fi
 
-echo "[INFO] $(date -u +"%Y-%m-%d %H:%M:%S") Realm was successfully imported!"
+echo "[INFO] $(date -u +"%Y-%m-%d %H:%M:%S") Authentication realm was successfully imported!"
+
+exit 0

@@ -4,6 +4,9 @@
  */
 package io.strimzi.systemtest.utils.kafkaUtils;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.dataformat.yaml.YAMLMapper;
 import io.strimzi.api.kafka.model.KafkaUser;
 import io.strimzi.systemtest.Constants;
 import io.strimzi.systemtest.resources.ResourceManager;
@@ -14,6 +17,8 @@ import io.strimzi.test.TestUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.io.File;
+import java.io.IOException;
 import java.util.Random;
 
 import static io.strimzi.systemtest.enums.CustomResourceStatus.NotReady;
@@ -86,16 +91,28 @@ public class KafkaUserUtils {
      * @param userName name of KafkaUser
      * @param state desired state
      */
-    public static void waitForKafkaUserStatus(String userName, Enum<?> state) {
+    public static boolean waitForKafkaUserStatus(String userName, Enum<?> state) {
         KafkaUser kafkaUser = KafkaUserResource.kafkaUserClient().inNamespace(kubeClient().getNamespace()).withName(userName).get();
-        ResourceManager.waitForResourceStatus(KafkaUserResource.kafkaUserClient(), kafkaUser, state);
+        return ResourceManager.waitForResourceStatus(KafkaUserResource.kafkaUserClient(), kafkaUser, state);
     }
 
-    public static void waitForKafkaUserReady(String userName) {
-        waitForKafkaUserStatus(userName, Ready);
+    public static boolean waitForKafkaUserReady(String userName) {
+        return waitForKafkaUserStatus(userName, Ready);
     }
 
-    public static void waitForKafkaUserNotReady(String userName) {
-        waitForKafkaUserStatus(userName, NotReady);
+    public static boolean waitForKafkaUserNotReady(String userName) {
+        return waitForKafkaUserStatus(userName, NotReady);
+    }
+
+    public static String removeKafkaUserPart(File kafkaUserFile, String partName) {
+        YAMLMapper mapper = new YAMLMapper();
+        try {
+            JsonNode node = mapper.readTree(kafkaUserFile);
+            ObjectNode kafkaUserSpec = (ObjectNode) node.at("/spec");
+            kafkaUserSpec.remove(partName);
+            return mapper.writeValueAsString(node);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
     }
 }

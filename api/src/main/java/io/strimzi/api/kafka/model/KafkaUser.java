@@ -9,14 +9,16 @@ import com.fasterxml.jackson.annotation.JsonPropertyOrder;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import com.fasterxml.jackson.dataformat.yaml.YAMLMapper;
-import io.fabric8.kubernetes.api.model.Doneable;
+import io.fabric8.kubernetes.api.model.Namespaced;
 import io.fabric8.kubernetes.api.model.ObjectMeta;
 import io.fabric8.kubernetes.client.CustomResource;
+import io.fabric8.kubernetes.model.annotation.Group;
+import io.fabric8.kubernetes.model.annotation.Version;
 import io.strimzi.api.kafka.model.status.KafkaUserStatus;
 import io.strimzi.crdgenerator.annotations.Crd;
 import io.strimzi.crdgenerator.annotations.Description;
 import io.sundr.builder.annotations.Buildable;
-import io.sundr.builder.annotations.Inline;
+import io.sundr.builder.annotations.BuildableReference;
 import lombok.EqualsAndHashCode;
 
 import java.util.HashMap;
@@ -40,16 +42,9 @@ import static java.util.Collections.unmodifiableList;
                 group = KafkaUser.RESOURCE_GROUP,
                 scope = KafkaUser.SCOPE,
                 versions = {
-                        @Crd.Spec.Version(
-                                name = KafkaUser.V1BETA1,
-                                served = true,
-                                storage = true
-                        ),
-                        @Crd.Spec.Version(
-                                name = KafkaUser.V1ALPHA1,
-                                served = true,
-                                storage = false
-                        )
+                        @Crd.Spec.Version(name = KafkaUser.V1BETA2, served = true, storage = false),
+                        @Crd.Spec.Version(name = KafkaUser.V1BETA1, served = true, storage = true),
+                        @Crd.Spec.Version(name = KafkaUser.V1ALPHA1, served = true, storage = false)
                 },
                 subresources = @Crd.Spec.Subresources(
                         status = @Crd.Spec.Subresources.Status()
@@ -72,6 +67,12 @@ import static java.util.Collections.unmodifiableList;
                                 description = "How the user is authorised",
                                 jsonPath = ".spec.authorization.type",
                                 type = "string"
+                        ),
+                        @Crd.Spec.AdditionalPrinterColumn(
+                                name = "Ready",
+                                description = "The state of the custom resource",
+                                jsonPath = ".status.conditions[?(@.type==\"Ready\")].status",
+                                type = "string"
                         )
                 }
         )
@@ -79,18 +80,22 @@ import static java.util.Collections.unmodifiableList;
 @Buildable(
         editableEnabled = false,
         builderPackage = Constants.FABRIC8_KUBERNETES_API,
-        inline = @Inline(type = Doneable.class, prefix = "Doneable", value = "done")
+        refs = {@BuildableReference(ObjectMeta.class)}
 )
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @JsonPropertyOrder({"apiVersion", "kind", "metadata", "spec", "status"})
 @EqualsAndHashCode
-public class KafkaUser extends CustomResource implements HasSpecAndStatus<KafkaUserSpec, KafkaUserStatus>, UnknownPropertyPreserving {
+@Version(Constants.V1BETA2)
+@Group(Constants.STRIMZI_GROUP)
+public class KafkaUser extends CustomResource<KafkaUserSpec, KafkaUserStatus> implements Namespaced, UnknownPropertyPreserving {
     private static final long serialVersionUID = 1L;
 
     public static final String SCOPE = "Namespaced";
     public static final String V1ALPHA1 = Constants.V1ALPHA1;
     public static final String V1BETA1 = Constants.V1BETA1;
-    public static final List<String> VERSIONS = unmodifiableList(asList(V1BETA1, V1ALPHA1));
+    public static final String V1BETA2 = Constants.V1BETA2;
+    public static final String CONSUMED_VERSION = V1BETA2;
+    public static final List<String> VERSIONS = unmodifiableList(asList(V1BETA2, V1BETA1, V1ALPHA1));
     public static final String RESOURCE_KIND = "KafkaUser";
     public static final String RESOURCE_LIST_KIND = RESOURCE_KIND + "List";
     public static final String RESOURCE_GROUP = Constants.RESOURCE_GROUP_NAME;
@@ -119,19 +124,21 @@ public class KafkaUser extends CustomResource implements HasSpecAndStatus<KafkaU
 
     @Override
     public ObjectMeta getMetadata() {
-        return super.getMetadata();
+        return metadata;
     }
 
     @Override
     public void setMetadata(ObjectMeta metadata) {
-        super.setMetadata(metadata);
+        this.metadata = metadata;
     }
 
+    @Override
     @Description("The specification of the user.")
     public KafkaUserSpec getSpec() {
         return spec;
     }
 
+    @Override
     public void setSpec(KafkaUserSpec spec) {
         this.spec = spec;
     }
@@ -142,6 +149,7 @@ public class KafkaUser extends CustomResource implements HasSpecAndStatus<KafkaU
         return status;
     }
 
+    @Override
     public void setStatus(KafkaUserStatus status) {
         this.status = status;
     }

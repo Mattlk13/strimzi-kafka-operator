@@ -24,6 +24,8 @@ public interface KubeCmdClient<K extends KubeCmdClient<K>> {
 
     String defaultNamespace();
     String defaultOlmNamespace();
+    String defaultOlmSourceNamespace();
+
 
     /** Deletes the resources by resource name. */
     K deleteByName(String resourceType, String resourceName);
@@ -36,14 +38,22 @@ public interface KubeCmdClient<K extends KubeCmdClient<K>> {
     /** Creates the resources in the given files. */
     K create(File... files);
 
+    K create(File file);
+
     /** Creates the resources in the given files. */
     K apply(File... files);
 
     /** Deletes the resources in the given files. */
     K delete(File... files);
 
+    K createOrReplace(File file);
+
     default K create(String... files) {
         return create(asList(files).stream().map(File::new).collect(toList()).toArray(new File[0]));
+    }
+
+    default K replace(String... files) {
+        return replace(asList(files).stream().map(File::new).collect(toList()).toArray(new File[0]));
     }
 
     default K apply(String... files) {
@@ -57,11 +67,11 @@ public interface KubeCmdClient<K extends KubeCmdClient<K>> {
     /** Replaces the resources in the given files. */
     K replace(File... files);
 
-
-    /** Returns an equivalent client, but logged in as cluster admin. */
-    K clientWithAdmin();
-
     K applyContent(String yamlContent);
+
+    K createContent(String yamlContent);
+
+    K replaceContent(String yamlContent);
 
     K deleteContent(String yamlContent);
 
@@ -163,6 +173,8 @@ public interface KubeCmdClient<K extends KubeCmdClient<K>> {
 
     String getResourceAsYaml(String resourceType, String resourceName);
 
+    String getResources(String resourceType);
+
     String getResourcesAsYaml(String resourceType);
 
     void createResourceAndApply(String template, Map<String, String> params);
@@ -203,4 +215,10 @@ public interface KubeCmdClient<K extends KubeCmdClient<K>> {
     List<String> listResourcesByLabel(String resourceType, String label);
 
     String cmd();
+
+    String getResourceJsonPath(String resourceType, String resourceName, String path);
+
+    boolean getResourceReadiness(String resourceType, String resourceName);
+
+    void patchResource(String resourceType, String resourceName, String patchPath, String value);
 }

@@ -8,17 +8,16 @@ import io.fabric8.kubernetes.client.dsl.MixedOperation;
 import io.fabric8.openshift.api.model.DeploymentCondition;
 import io.fabric8.openshift.api.model.DeploymentConfig;
 import io.fabric8.openshift.api.model.DeploymentConfigList;
-import io.fabric8.openshift.api.model.DoneableDeploymentConfig;
 import io.fabric8.openshift.client.OpenShiftClient;
 import io.fabric8.openshift.client.dsl.DeployableScalableResource;
-import io.fabric8.openshift.client.internal.readiness.OpenShiftReadiness;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 
 /**
  * Operations for {@code DeploymentConfigs}s.
  */
-public class DeploymentConfigOperator extends AbstractScalableResourceOperator<OpenShiftClient, DeploymentConfig, DeploymentConfigList, DoneableDeploymentConfig, DeployableScalableResource<DeploymentConfig, DoneableDeploymentConfig>> {
+public class DeploymentConfigOperator extends AbstractScalableResourceOperator<OpenShiftClient, DeploymentConfig,
+        DeploymentConfigList, DeployableScalableResource<DeploymentConfig>> {
     /**
      * Constructor
      * @param vertx The Vertx instance
@@ -29,7 +28,7 @@ public class DeploymentConfigOperator extends AbstractScalableResourceOperator<O
     }
 
     @Override
-    protected MixedOperation<DeploymentConfig, DeploymentConfigList, DoneableDeploymentConfig, DeployableScalableResource<DeploymentConfig, DoneableDeploymentConfig>> operation() {
+    protected MixedOperation<DeploymentConfig, DeploymentConfigList, DeployableScalableResource<DeploymentConfig>> operation() {
         return client.deploymentConfigs();
     }
 
@@ -116,14 +115,11 @@ public class DeploymentConfigOperator extends AbstractScalableResourceOperator<O
      */
     @Override
     public boolean isReady(String namespace, String name) {
-        DeployableScalableResource<DeploymentConfig, DoneableDeploymentConfig> resourceOp = operation().inNamespace(namespace).withName(name);
+        DeployableScalableResource<DeploymentConfig> resourceOp = operation().inNamespace(namespace).withName(name);
         DeploymentConfig resource = resourceOp.get();
         
         if (resource != null)   {
-            // resourceOp.isReady() does not work because of https://github.com/fabric8io/kubernetes-client/issues/2537
-            // This method provides a temporary workaround by calling OpenShiftReadiness.isDeploymentConfigReady(...) directly.
-            // TODO: This should be changed to resourceOp.isReady() after https://github.com/fabric8io/kubernetes-client/issues/2537 is fixed.
-            return Boolean.TRUE.equals(OpenShiftReadiness.isDeploymentConfigReady(resource));
+            return Boolean.TRUE.equals(resourceOp.isReady());
         } else {
             return false;
         }

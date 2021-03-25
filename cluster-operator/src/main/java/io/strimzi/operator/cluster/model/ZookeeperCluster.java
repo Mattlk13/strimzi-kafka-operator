@@ -4,7 +4,6 @@
  */
 package io.strimzi.operator.cluster.model;
 
-import io.fabric8.kubernetes.api.model.Affinity;
 import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.Container;
 import io.fabric8.kubernetes.api.model.ContainerBuilder;
@@ -19,16 +18,15 @@ import io.fabric8.kubernetes.api.model.Secret;
 import io.fabric8.kubernetes.api.model.SecurityContext;
 import io.fabric8.kubernetes.api.model.Service;
 import io.fabric8.kubernetes.api.model.ServicePort;
-import io.fabric8.kubernetes.api.model.Toleration;
 import io.fabric8.kubernetes.api.model.Volume;
 import io.fabric8.kubernetes.api.model.VolumeMount;
 import io.fabric8.kubernetes.api.model.apps.StatefulSet;
-import io.fabric8.kubernetes.api.model.networking.NetworkPolicy;
-import io.fabric8.kubernetes.api.model.networking.NetworkPolicyBuilder;
-import io.fabric8.kubernetes.api.model.networking.NetworkPolicyIngressRule;
-import io.fabric8.kubernetes.api.model.networking.NetworkPolicyIngressRuleBuilder;
-import io.fabric8.kubernetes.api.model.networking.NetworkPolicyPeer;
-import io.fabric8.kubernetes.api.model.networking.NetworkPolicyPort;
+import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicy;
+import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicyBuilder;
+import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicyIngressRule;
+import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicyIngressRuleBuilder;
+import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicyPeer;
+import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicyPort;
 import io.fabric8.kubernetes.api.model.policy.PodDisruptionBudget;
 import io.strimzi.api.kafka.model.ContainerEnvVar;
 import io.strimzi.api.kafka.model.InlineLogging;
@@ -45,6 +43,7 @@ import io.strimzi.api.kafka.model.storage.PersistentClaimStorage;
 import io.strimzi.api.kafka.model.storage.Storage;
 import io.strimzi.api.kafka.model.template.ZookeeperClusterTemplate;
 import io.strimzi.certs.CertAndKey;
+import io.strimzi.operator.common.MetricsAndLogging;
 import io.strimzi.operator.common.Util;
 import io.strimzi.operator.common.model.Labels;
 import io.strimzi.operator.common.operator.resource.StatusUtils;
@@ -99,6 +98,12 @@ public class ZookeeperCluster extends AbstractModel {
     // Templates
     protected List<ContainerEnvVar> templateZookeeperContainerEnvVars;
     protected SecurityContext templateZookeeperContainerSecurityContext;
+
+    /**
+     * Private key and certificate for each ZooKeeper Pod name
+     * used as server certificates for ZooKeeper nodes
+     */
+    private Map<String, CertAndKey> nodeCerts;
 
     public static String zookeeperClusterName(String cluster) {
         return KafkaResources.zookeeperStatefulSetName(cluster);
@@ -190,7 +195,7 @@ public class ZookeeperCluster extends AbstractModel {
         return fromCrd(kafkaAssembly, versions, null, 0);
     }
 
-    @SuppressWarnings({"checkstyle:MethodLength", "checkstyle:CyclomaticComplexity"})
+    @SuppressWarnings({"checkstyle:MethodLength", "checkstyle:CyclomaticComplexity", "deprecation"})
     public static ZookeeperCluster fromCrd(Kafka kafkaAssembly, KafkaVersion.Lookup versions, Storage oldStorage, int oldReplicas) {
         ZookeeperCluster zk = new ZookeeperCluster(kafkaAssembly);
         zk.setOwnerReference(kafkaAssembly);
@@ -231,11 +236,8 @@ public class ZookeeperCluster extends AbstractModel {
             zk.setJavaSystemProperties(zookeeperClusterSpec.getJvmOptions().getJavaSystemProperties());
         }
 
-        Map<String, Object> metrics = zookeeperClusterSpec.getMetrics();
-        if (metrics != null) {
-            zk.setMetricsEnabled(true);
-            zk.setMetricsConfig(metrics.entrySet());
-        }
+        // Parse different types of metrics configurations
+        ModelUtils.parseMetrics(zk, zookeeperClusterSpec);
 
         if (oldStorage != null) {
             Storage newStorage = zookeeperClusterSpec.getStorage();
@@ -315,30 +317,7 @@ public class ZookeeperCluster extends AbstractModel {
             ModelUtils.parsePodDisruptionBudgetTemplate(zk, template.getPodDisruptionBudget());
         }
 
-        // Zookeeper needs special treatment for Affinity and Tolerations because of deprecated fields in spec
-        zk.setUserAffinity(affinity(zookeeperClusterSpec));
-        zk.setTolerations(tolerations(zookeeperClusterSpec));
-
         return zk;
-    }
-
-    @SuppressWarnings("deprecation")
-    static List<Toleration> tolerations(ZookeeperClusterSpec zookeeperClusterSpec) {
-        return ModelUtils.tolerations("spec.zookeeper.tolerations", zookeeperClusterSpec.getTolerations(), "spec.zookeeper.template.pod.tolerations", zookeeperClusterSpec.getTemplate() == null ? null : zookeeperClusterSpec.getTemplate().getPod());
-    }
-
-    @SuppressWarnings("deprecation")
-    static Affinity affinity(ZookeeperClusterSpec zookeeperClusterSpec) {
-        if (zookeeperClusterSpec.getTemplate() != null
-                && zookeeperClusterSpec.getTemplate().getPod() != null
-                && zookeeperClusterSpec.getTemplate().getPod().getAffinity() != null) {
-            if (zookeeperClusterSpec.getAffinity() != null) {
-                log.warn("Affinity given on both spec.zookeeper.affinity and spec.zookeeper.template.pod.affinity; latter takes precedence");
-            }
-            return zookeeperClusterSpec.getTemplate().getPod().getAffinity();
-        } else {
-            return zookeeperClusterSpec.getAffinity();
-        }
     }
 
     public Service generateService() {
@@ -352,7 +331,15 @@ public class ZookeeperCluster extends AbstractModel {
         return cluster + NETWORK_POLICY_KEY_SUFFIX + NAME_SUFFIX;
     }
 
-    public NetworkPolicy generateNetworkPolicy(boolean namespaceAndPodSelectorNetworkPolicySupported) {
+    /**
+     * Generates the NetworkPolicies relevant for ZooKeeper nodes
+     *
+     * @param operatorNamespace                             Namespace where the Strimzi Cluster Operator runs. Null if not configured.
+     * @param operatorNamespaceLabels                       Labels of the namespace where the Strimzi Cluster Operator runs. Null if not configured.
+     *
+     * @return The network policy.
+     */
+    public NetworkPolicy generateNetworkPolicy(String operatorNamespace, Labels operatorNamespaceLabels) {
         List<NetworkPolicyIngressRule> rules = new ArrayList<>(2);
 
         NetworkPolicyPort clientsPort = new NetworkPolicyPort();
@@ -385,46 +372,43 @@ public class ZookeeperCluster extends AbstractModel {
                 .withFrom()
                 .build();
 
-        if (namespaceAndPodSelectorNetworkPolicySupported) {
-            NetworkPolicyPeer kafkaClusterPeer = new NetworkPolicyPeer();
-            LabelSelector labelSelector = new LabelSelector();
-            Map<String, String> expressions = new HashMap<>(1);
-            expressions.put(Labels.STRIMZI_NAME_LABEL, KafkaCluster.kafkaClusterName(cluster));
-            labelSelector.setMatchLabels(expressions);
-            kafkaClusterPeer.setPodSelector(labelSelector);
+        NetworkPolicyPeer kafkaClusterPeer = new NetworkPolicyPeer();
+        LabelSelector labelSelector = new LabelSelector();
+        Map<String, String> expressions = new HashMap<>(1);
+        expressions.put(Labels.STRIMZI_NAME_LABEL, KafkaCluster.kafkaClusterName(cluster));
+        labelSelector.setMatchLabels(expressions);
+        kafkaClusterPeer.setPodSelector(labelSelector);
 
-            NetworkPolicyPeer entityOperatorPeer = new NetworkPolicyPeer();
-            LabelSelector labelSelector3 = new LabelSelector();
-            Map<String, String> expressions3 = new HashMap<>(1);
-            expressions3.put(Labels.STRIMZI_NAME_LABEL, EntityOperator.entityOperatorName(cluster));
-            labelSelector3.setMatchLabels(expressions3);
-            entityOperatorPeer.setPodSelector(labelSelector3);
+        NetworkPolicyPeer entityOperatorPeer = new NetworkPolicyPeer();
+        LabelSelector labelSelector3 = new LabelSelector();
+        Map<String, String> expressions3 = new HashMap<>(1);
+        expressions3.put(Labels.STRIMZI_NAME_LABEL, EntityOperator.entityOperatorName(cluster));
+        labelSelector3.setMatchLabels(expressions3);
+        entityOperatorPeer.setPodSelector(labelSelector3);
 
-            NetworkPolicyPeer clusterOperatorPeer = new NetworkPolicyPeer();
-            LabelSelector labelSelector4 = new LabelSelector();
-            Map<String, String> expressions4 = new HashMap<>(1);
-            expressions4.put(Labels.STRIMZI_KIND_LABEL, "cluster-operator");
-            labelSelector4.setMatchLabels(expressions4);
-            clusterOperatorPeer.setPodSelector(labelSelector4);
-            clusterOperatorPeer.setNamespaceSelector(new LabelSelector());
+        NetworkPolicyPeer clusterOperatorPeer = new NetworkPolicyPeer();
+        LabelSelector labelSelector4 = new LabelSelector();
+        Map<String, String> expressions4 = new HashMap<>(1);
+        expressions4.put(Labels.STRIMZI_KIND_LABEL, "cluster-operator");
+        labelSelector4.setMatchLabels(expressions4);
+        clusterOperatorPeer.setPodSelector(labelSelector4);
+        ModelUtils.setClusterOperatorNetworkPolicyNamespaceSelector(clusterOperatorPeer, namespace, operatorNamespace, operatorNamespaceLabels);
 
-            NetworkPolicyPeer cruiseControlPeer = new NetworkPolicyPeer();
-            LabelSelector labelSelector5 = new LabelSelector();
-            Map<String, String> expressions5 = new HashMap<>(1);
-            expressions5.put(Labels.STRIMZI_NAME_LABEL, CruiseControl.cruiseControlName(cluster));
-            labelSelector5.setMatchLabels(expressions5);
-            cruiseControlPeer.setPodSelector(labelSelector5);
+        NetworkPolicyPeer cruiseControlPeer = new NetworkPolicyPeer();
+        LabelSelector labelSelector5 = new LabelSelector();
+        Map<String, String> expressions5 = new HashMap<>(1);
+        expressions5.put(Labels.STRIMZI_NAME_LABEL, CruiseControl.cruiseControlName(cluster));
+        labelSelector5.setMatchLabels(expressions5);
+        cruiseControlPeer.setPodSelector(labelSelector5);
             
-            // This is a hack because we have no guarantee that the CO namespace has some particular labels
-            List<NetworkPolicyPeer> clientsPortPeers = new ArrayList<>(4);
-            clientsPortPeers.add(kafkaClusterPeer);
-            clientsPortPeers.add(zookeeperClusterPeer);
-            clientsPortPeers.add(entityOperatorPeer);
-            clientsPortPeers.add(clusterOperatorPeer);
-            clientsPortPeers.add(cruiseControlPeer);
-
-            clientsIngressRule.setFrom(clientsPortPeers);
-        }
+        // This is a hack because we have no guarantee that the CO namespace has some particular labels
+        List<NetworkPolicyPeer> clientsPortPeers = new ArrayList<>(4);
+        clientsPortPeers.add(kafkaClusterPeer);
+        clientsPortPeers.add(zookeeperClusterPeer);
+        clientsPortPeers.add(entityOperatorPeer);
+        clientsPortPeers.add(clusterOperatorPeer);
+        clientsPortPeers.add(cruiseControlPeer);
+        clientsIngressRule.setFrom(clientsPortPeers);
 
         rules.add(clientsIngressRule);
 
@@ -476,38 +460,40 @@ public class ZookeeperCluster extends AbstractModel {
     }
 
     /**
+     * Generates the ZooKeeper nodes certificates
+     *
+     * @param kafka The Kafka custom resource
+     * @param clusterCa The CA for cluster certificates
+     * @param isMaintenanceTimeWindowsSatisfied Indicates whether we are in the maintenance window or not.
+     *                                          This is used for certificate renewals
+     */
+    public void generateCertificates(Kafka kafka, ClusterCa clusterCa, boolean isMaintenanceTimeWindowsSatisfied) {
+        log.debug("Generating certificates");
+        try {
+            nodeCerts = clusterCa.generateZkCerts(kafka, isMaintenanceTimeWindowsSatisfied);
+        } catch (IOException e) {
+            log.warn("Error while generating certificates", e);
+        }
+        log.debug("End generating certificates");
+    }
+
+    /**
      * Generate the Secret containing the Zookeeper nodes certificates signed by the cluster CA certificate used for TLS based
      * internal communication with Kafka.
      * It also contains the related Zookeeper nodes private keys.
      *
-     * @param clusterCa The cluster CA.
-     * @param kafka The Kafka resource.
-     * @param isMaintenanceTimeWindowsSatisfied Indicates whether we are in the maintenance window or not.
-     *                                          This is used for certificate renewals
      * @return The generated Secret.
      */
-    public Secret generateNodesSecret(ClusterCa clusterCa, Kafka kafka, boolean isMaintenanceTimeWindowsSatisfied) {
+    public Secret generateNodesSecret() {
 
         Map<String, String> data = new HashMap<>(replicas * 4);
-
-        log.debug("Generating certificates");
-        Map<String, CertAndKey> certs;
-        try {
-            log.debug("Cluster communication certificates");
-            certs = clusterCa.generateZkCerts(kafka, isMaintenanceTimeWindowsSatisfied);
-            log.debug("End generating certificates");
-            for (int i = 0; i < replicas; i++) {
-                CertAndKey cert = certs.get(ZookeeperCluster.zookeeperPodName(cluster, i));
-                data.put(ZookeeperCluster.zookeeperPodName(cluster, i) + ".key", cert.keyAsBase64String());
-                data.put(ZookeeperCluster.zookeeperPodName(cluster, i) + ".crt", cert.certAsBase64String());
-                data.put(ZookeeperCluster.zookeeperPodName(cluster, i) + ".p12", cert.keyStoreAsBase64String());
-                data.put(ZookeeperCluster.zookeeperPodName(cluster, i) + ".password", cert.storePasswordAsBase64String());
-            }
-
-        } catch (IOException e) {
-            log.warn("Error while generating certificates", e);
+        for (int i = 0; i < replicas; i++) {
+            CertAndKey cert = nodeCerts.get(ZookeeperCluster.zookeeperPodName(cluster, i));
+            data.put(ZookeeperCluster.zookeeperPodName(cluster, i) + ".key", cert.keyAsBase64String());
+            data.put(ZookeeperCluster.zookeeperPodName(cluster, i) + ".crt", cert.certAsBase64String());
+            data.put(ZookeeperCluster.zookeeperPodName(cluster, i) + ".p12", cert.keyStoreAsBase64String());
+            data.put(ZookeeperCluster.zookeeperPodName(cluster, i) + ".password", cert.storePasswordAsBase64String());
         }
-
         return createSecret(ZookeeperCluster.nodesSecretName(cluster), data);
     }
 
@@ -581,11 +567,14 @@ public class ZookeeperCluster extends AbstractModel {
     }
 
     private List<Volume> getVolumes(boolean isOpenShift) {
-        List<Volume> volumeList = new ArrayList<>(4);
+        List<Volume> volumeList = new ArrayList<>(5);
+
         if (storage instanceof EphemeralStorage) {
             String sizeLimit = ((EphemeralStorage) storage).getSizeLimit();
             volumeList.add(VolumeUtils.createEmptyDirVolume(VOLUME_NAME, sizeLimit));
         }
+
+        volumeList.add(createTempDirVolume());
         volumeList.add(VolumeUtils.createConfigMapVolume(logAndMetricsConfigVolumeName, ancillaryConfigMapName));
         volumeList.add(VolumeUtils.createSecretVolume(ZOOKEEPER_NODE_CERTIFICATES_VOLUME_NAME, ZookeeperCluster.nodesSecretName(cluster), isOpenShift));
         volumeList.add(VolumeUtils.createSecretVolume(ZOOKEEPER_CLUSTER_CA_VOLUME_NAME, AbstractModel.clusterCaCertSecretName(cluster), isOpenShift));
@@ -612,7 +601,9 @@ public class ZookeeperCluster extends AbstractModel {
     }
 
     private List<VolumeMount> getVolumeMounts() {
-        List<VolumeMount> volumeMountList = new ArrayList<>(4);
+        List<VolumeMount> volumeMountList = new ArrayList<>(5);
+
+        volumeMountList.add(createTempDirVolumeMount());
         volumeMountList.add(VolumeUtils.createVolumeMount(VOLUME_NAME, mountPath));
         volumeMountList.add(VolumeUtils.createVolumeMount(logAndMetricsConfigVolumeName, logAndMetricsConfigMountPath));
         volumeMountList.add(VolumeUtils.createVolumeMount(ZOOKEEPER_NODE_CERTIFICATES_VOLUME_NAME, ZOOKEEPER_NODE_CERTIFICATES_VOLUME_MOUNT));
@@ -665,12 +656,12 @@ public class ZookeeperCluster extends AbstractModel {
     /**
      * Generates a configuration ConfigMap with metrics and logging configurations and node count.
      *
-     * @param cm    The ConfigMap with original logging configuration
+     * @param metricsAndLogging    The ConfigMaps with original logging and metrics configurations.
      *
      * @return      The generated configuration ConfigMap.
      */
-    public ConfigMap generateConfigurationConfigMap(ConfigMap cm) {
-        ConfigMap zkConfigMap = super.generateMetricsAndLogConfigMap(cm);
+    public ConfigMap generateConfigurationConfigMap(MetricsAndLogging metricsAndLogging) {
+        ConfigMap zkConfigMap = super.generateMetricsAndLogConfigMap(metricsAndLogging);
         zkConfigMap.getData().put(CONFIG_MAP_KEY_ZOOKEEPER_NODE_COUNT, Integer.toString(getReplicas()));
         return zkConfigMap;
     }

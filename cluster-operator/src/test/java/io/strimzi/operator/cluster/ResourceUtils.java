@@ -43,6 +43,7 @@ import io.strimzi.api.kafka.model.KafkaMirrorMakerConsumerSpec;
 import io.strimzi.api.kafka.model.KafkaMirrorMakerProducerSpec;
 import io.strimzi.api.kafka.model.KafkaSpec;
 import io.strimzi.api.kafka.model.Logging;
+import io.strimzi.api.kafka.model.MetricsConfig;
 import io.strimzi.api.kafka.model.Probe;
 import io.strimzi.api.kafka.model.ProbeBuilder;
 import io.strimzi.api.kafka.model.ZookeeperClusterSpec;
@@ -71,6 +72,7 @@ import io.strimzi.operator.common.PasswordGenerator;
 import io.strimzi.operator.common.model.Labels;
 import io.strimzi.operator.common.operator.MockCertManager;
 import io.strimzi.operator.common.operator.resource.BuildConfigOperator;
+import io.strimzi.operator.common.operator.resource.BuildOperator;
 import io.strimzi.operator.common.operator.resource.ClusterRoleBindingOperator;
 import io.strimzi.operator.common.operator.resource.ConfigMapOperator;
 import io.strimzi.operator.common.operator.resource.CrdOperator;
@@ -78,12 +80,14 @@ import io.strimzi.operator.common.operator.resource.DeploymentConfigOperator;
 import io.strimzi.operator.common.operator.resource.DeploymentOperator;
 import io.strimzi.operator.common.operator.resource.ImageStreamOperator;
 import io.strimzi.operator.common.operator.resource.IngressOperator;
+import io.strimzi.operator.common.operator.resource.IngressV1Beta1Operator;
 import io.strimzi.operator.common.operator.resource.NetworkPolicyOperator;
 import io.strimzi.operator.common.operator.resource.NodeOperator;
 import io.strimzi.operator.common.operator.resource.PodDisruptionBudgetOperator;
 import io.strimzi.operator.common.operator.resource.PodOperator;
 import io.strimzi.operator.common.operator.resource.PvcOperator;
 import io.strimzi.operator.common.operator.resource.RoleBindingOperator;
+import io.strimzi.operator.common.operator.resource.RoleOperator;
 import io.strimzi.operator.common.operator.resource.RouteOperator;
 import io.strimzi.operator.common.operator.resource.SecretOperator;
 import io.strimzi.operator.common.operator.resource.ServiceAccountOperator;
@@ -178,18 +182,21 @@ public class ResourceUtils {
 
     public static Kafka createKafka(String namespace, String name, int replicas,
                                     String image, int healthDelay, int healthTimeout,
-                                    Map<String, Object> metricsCm,
+                                    Map<String, Object> metricsMap,
+                                    MetricsConfig metricsConfig,
                                     Map<String, Object> kafkaConfigurationJson,
                                     Map<String, Object> zooConfigurationJson) {
         return new KafkaBuilder(createKafka(namespace, name, replicas, image, healthDelay, healthTimeout))
                 .editSpec()
                     .editKafka()
-                        .withMetrics(metricsCm)
+                        .withMetrics(metricsMap)
                         .withConfig(kafkaConfigurationJson)
+                        .withMetricsConfig(metricsConfig)
                     .endKafka()
                     .editZookeeper()
                         .withConfig(zooConfigurationJson)
-                        .withMetrics(metricsCm)
+                        .withMetrics(metricsMap)
+                        .withMetricsConfig(metricsConfig)
                     .endZookeeper()
                 .endSpec()
                 .build();
@@ -324,10 +331,11 @@ public class ResourceUtils {
     public static Kafka createKafka(String namespace, String name, int replicas,
                                     String image, int healthDelay, int healthTimeout,
                                     Map<String, Object> metricsCm,
+                                    MetricsConfig metricsConfig,
                                     Map<String, Object> kafkaConfigurationJson,
                                     Logging kafkaLogging, Logging zkLogging) {
         return new KafkaBuilder(createKafka(namespace, name, replicas, image, healthDelay,
-                    healthTimeout, metricsCm, kafkaConfigurationJson, emptyMap()))
+                    healthTimeout, metricsCm, metricsConfig, kafkaConfigurationJson, emptyMap()))
                 .editSpec()
                     .editKafka()
                         .withLogging(kafkaLogging)
@@ -356,6 +364,7 @@ public class ResourceUtils {
     public static Kafka createKafka(String namespace, String name, int replicas,
                                     String image, int healthDelay, int healthTimeout,
                                     Map<String, Object> metricsCm,
+                                    MetricsConfig metricsConfig,
                                     Map<String, Object> kafkaConfiguration,
                                     Map<String, Object> zooConfiguration,
                                     Storage kafkaStorage,
@@ -391,6 +400,7 @@ public class ResourceUtils {
         if (metricsCm != null) {
             kafkaClusterSpec.setMetrics(metricsCm);
         }
+        kafkaClusterSpec.setMetricsConfig(metricsConfig);
 
         if (kafkaConfiguration != null) {
             kafkaClusterSpec.setConfig(kafkaConfiguration);
@@ -413,6 +423,7 @@ public class ResourceUtils {
         if (metricsCm != null) {
             zk.setMetrics(metricsCm);
         }
+        zk.setMetricsConfig(metricsConfig);
 
         spec.setKafkaExporter(keSpec);
         spec.setCruiseControl(ccSpec);
@@ -427,9 +438,10 @@ public class ResourceUtils {
      * Create a Kafka Connect S2I custom resource
      */
     public static KafkaConnectS2I createKafkaConnectS2I(String namespace, String name, int replicas,
-                                                        String image, int healthDelay, int healthTimeout, String metricsCmJson,
+                                                        String image, int healthDelay, int healthTimeout, MetricsConfig metrics, String metricsCmJson,
                                                         String connectConfig, boolean insecureSourceRepo, String bootstrapServers,
                                                         ResourceRequirements builResourceRequirements) {
+
 
         return new KafkaConnectS2IBuilder(createEmptyKafkaConnectS2I(namespace, name))
                 .editOrNewSpec()
@@ -439,6 +451,7 @@ public class ResourceUtils {
                     .withLivenessProbe(new Probe(healthDelay, healthTimeout))
                     .withReadinessProbe(new Probe(healthDelay, healthTimeout))
                     .withMetrics((Map<String, Object>) TestUtils.fromJson(metricsCmJson, Map.class))
+                    .withMetricsConfig(metrics)
                     .withConfig((Map<String, Object>) TestUtils.fromJson(connectConfig, Map.class))
                     .withInsecureSourceRepository(insecureSourceRepo)
                     .withBuildResources(builResourceRequirements)
@@ -513,11 +526,14 @@ public class ResourceUtils {
                 .build();
     }
 
-    public static KafkaMirrorMaker createKafkaMirrorMaker(String namespace, String name, String image, KafkaMirrorMakerProducerSpec producer, KafkaMirrorMakerConsumerSpec consumer, String whitelist, Map<String, Object> metricsCm) {
+    public static KafkaMirrorMaker createKafkaMirrorMaker(String namespace, String name, String image, KafkaMirrorMakerProducerSpec producer,
+                                                          KafkaMirrorMakerConsumerSpec consumer, String whitelist, Map<String, Object> metricsCm) {
         return createKafkaMirrorMaker(namespace, name, image, null, producer, consumer, whitelist, metricsCm);
     }
 
-    public static KafkaMirrorMaker createKafkaMirrorMaker(String namespace, String name, String image, Integer replicas, KafkaMirrorMakerProducerSpec producer, KafkaMirrorMakerConsumerSpec consumer, String whitelist, Map<String, Object> metricsCm) {
+    public static KafkaMirrorMaker createKafkaMirrorMaker(String namespace, String name, String image, Integer replicas,
+                                                          KafkaMirrorMakerProducerSpec producer, KafkaMirrorMakerConsumerSpec consumer,
+                                                          String whitelist, Map<String, Object> metricsCm) {
 
         KafkaMirrorMakerBuilder builder = new KafkaMirrorMakerBuilder()
                 .withMetadata(new ObjectMetaBuilder()
@@ -633,7 +649,8 @@ public class ResourceUtils {
                     Constructor<DescribeClusterResult> declaredConstructor = DescribeClusterResult.class.getDeclaredConstructor(KafkaFuture.class, KafkaFuture.class, KafkaFuture.class, KafkaFuture.class);
                     declaredConstructor.setAccessible(true);
                     KafkaFuture<Node> objectKafkaFuture = KafkaFutureImpl.completedFuture(new Node(0, "localhost", 9091));
-                    dcr = declaredConstructor.newInstance(null, objectKafkaFuture, null, null);
+                    KafkaFuture<String> stringKafkaFuture = KafkaFutureImpl.completedFuture("CLUSTERID");
+                    dcr = declaredConstructor.newInstance(null, objectKafkaFuture, stringKafkaFuture, null);
                 } catch (ReflectiveOperationException e) {
                     throw new RuntimeException(e);
                 }
@@ -719,17 +736,44 @@ public class ResourceUtils {
         RouteOperator routeOps = openShift ? mock(RouteOperator.class) : null;
 
         ResourceOperatorSupplier supplier = new ResourceOperatorSupplier(
-                mock(ServiceOperator.class), routeOps, mock(ZookeeperSetOperator.class),
-                mock(KafkaSetOperator.class), mock(ConfigMapOperator.class), mock(SecretOperator.class),
-                mock(PvcOperator.class), mock(DeploymentOperator.class),
-                mock(ServiceAccountOperator.class), mock(RoleBindingOperator.class), mock(ClusterRoleBindingOperator.class),
-                mock(NetworkPolicyOperator.class), mock(PodDisruptionBudgetOperator.class), mock(PodOperator.class),
-                mock(IngressOperator.class), mock(ImageStreamOperator.class), mock(BuildConfigOperator.class),
-                mock(DeploymentConfigOperator.class), mock(CrdOperator.class), mock(CrdOperator.class), mock(CrdOperator.class),
-                mock(CrdOperator.class), mock(CrdOperator.class), mock(CrdOperator.class), mock(CrdOperator.class), mock(CrdOperator.class),
-                mock(StorageClassOperator.class), mock(NodeOperator.class), zookeeperScalerProvider(), metricsProvider(), adminClientProvider());
+                mock(ServiceOperator.class),
+                routeOps,
+                mock(ZookeeperSetOperator.class),
+                mock(KafkaSetOperator.class),
+                mock(ConfigMapOperator.class),
+                mock(SecretOperator.class),
+                mock(PvcOperator.class),
+                mock(DeploymentOperator.class),
+                mock(ServiceAccountOperator.class),
+                mock(RoleBindingOperator.class),
+                mock(RoleOperator.class),
+                mock(ClusterRoleBindingOperator.class),
+                mock(NetworkPolicyOperator.class),
+                mock(PodDisruptionBudgetOperator.class),
+                mock(PodOperator.class),
+                mock(IngressOperator.class),
+                mock(IngressV1Beta1Operator.class),
+                mock(ImageStreamOperator.class),
+                mock(BuildConfigOperator.class),
+                mock(BuildOperator.class),
+                mock(DeploymentConfigOperator.class),
+                mock(CrdOperator.class),
+                mock(CrdOperator.class),
+                mock(CrdOperator.class),
+                mock(CrdOperator.class),
+                mock(CrdOperator.class),
+                mock(CrdOperator.class),
+                mock(CrdOperator.class),
+                mock(CrdOperator.class),
+                mock(StorageClassOperator.class),
+                mock(NodeOperator.class),
+                zookeeperScalerProvider(),
+                metricsProvider(),
+                adminClientProvider());
+
         when(supplier.serviceAccountOperations.reconcile(anyString(), anyString(), any())).thenReturn(Future.succeededFuture());
         when(supplier.roleBindingOperations.reconcile(anyString(), anyString(), any())).thenReturn(Future.succeededFuture());
+        when(supplier.roleOperations.reconcile(anyString(), anyString(), any())).thenReturn(Future.succeededFuture());
         when(supplier.clusterRoleBindingOperator.reconcile(anyString(), any())).thenReturn(Future.succeededFuture());
 
         if (openShift) {
@@ -768,9 +812,30 @@ public class ResourceUtils {
                 singleton("dummy"),
                 60_000,
                 operationTimeoutMs,
+                300_000,
                 false,
                 versions,
                 null,
+                null,
+                null,
+                null,
+                ClusterOperatorConfig.RbacScope.CLUSTER,
+                null);
+    }
+
+    public static ClusterOperatorConfig dummyClusterOperatorConfigRolesOnly(KafkaVersion.Lookup versions, long operationTimeoutMs) {
+        return new ClusterOperatorConfig(
+                singleton("dummy"),
+                60_000,
+                operationTimeoutMs,
+                300_000,
+                false,
+                versions,
+                null,
+                null,
+                null,
+                null,
+                ClusterOperatorConfig.RbacScope.NAMESPACE,
                 null);
     }
 

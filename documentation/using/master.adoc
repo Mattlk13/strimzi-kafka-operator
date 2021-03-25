@@ -7,13 +7,13 @@ include::shared/attributes.adoc[]
 
 include::assemblies/assembly-overview.adoc[leveloffset=+1]
 
-include::assemblies/assembly-deployment-configuration.adoc[leveloffset=+1]
+include::assemblies/configuring/assembly-deployment-configuration.adoc[leveloffset=+1]
 
 include::assemblies/assembly-securing-external-listeners.adoc[leveloffset=+1]
 
 include::assemblies/assembly-securing-access.adoc[leveloffset=+1]
 
-include::assemblies/assembly-operators.adoc[leveloffset=+1]
+include::assemblies/operators/assembly-operators.adoc[leveloffset=+1]
 
 include::assemblies/assembly-kafka-bridge-concepts.adoc[leveloffset=+1]
 
@@ -25,14 +25,12 @@ include::assemblies/security/assembly-security.adoc[leveloffset=+1]
 
 include::assemblies/managing/assembly-management-tasks.adoc[leveloffset=+1]
 
-[appendix]
-include::modules/appendix_faq.adoc[leveloffset=+1]
-
-[appendix]
 [id='api_reference-{context}']
 :parent-context: {context}
 :context: reference
-## Custom Resource API Reference
+
+== Custom resource API reference
 include::modules/con-common-configuration-properties.adoc[leveloffset=+1]
-include::modules/appendix_crds.adoc[]
+=== Schema properties
+include::modules/appendix_crds.adoc[leveloffset=+1]
 :context: {parent-context}

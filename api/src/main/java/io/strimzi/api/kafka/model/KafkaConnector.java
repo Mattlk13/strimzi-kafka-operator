@@ -7,15 +7,16 @@ package io.strimzi.api.kafka.model;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonPropertyOrder;
-import io.fabric8.kubernetes.api.model.Doneable;
+import io.fabric8.kubernetes.api.model.Namespaced;
 import io.fabric8.kubernetes.api.model.ObjectMeta;
 import io.fabric8.kubernetes.client.CustomResource;
-import io.strimzi.api.kafka.model.status.HasStatus;
+import io.fabric8.kubernetes.model.annotation.Group;
+import io.fabric8.kubernetes.model.annotation.Version;
 import io.strimzi.api.kafka.model.status.KafkaConnectorStatus;
 import io.strimzi.crdgenerator.annotations.Crd;
 import io.strimzi.crdgenerator.annotations.Description;
 import io.sundr.builder.annotations.Buildable;
-import io.sundr.builder.annotations.Inline;
+import io.sundr.builder.annotations.BuildableReference;
 import lombok.EqualsAndHashCode;
 import lombok.ToString;
 
@@ -38,10 +39,8 @@ import static java.util.Collections.unmodifiableList;
                 group = KafkaConnector.RESOURCE_GROUP,
                 scope = KafkaConnector.SCOPE,
                 versions = {
-                        @Crd.Spec.Version(
-                                name = KafkaConnector.V1ALPHA1,
-                                served = true,
-                                storage = true)
+                        @Crd.Spec.Version(name = KafkaConnector.V1BETA2, served = true, storage = false),
+                        @Crd.Spec.Version(name = KafkaConnector.V1ALPHA1, served = true, storage = true)
                 },
                 subresources = @Crd.Spec.Subresources(
                         status = @Crd.Spec.Subresources.Status(),
@@ -68,6 +67,12 @@ import static java.util.Collections.unmodifiableList;
                                 description = "Maximum number of tasks",
                                 jsonPath = ".spec.tasksMax",
                                 type = "integer"
+                        ),
+                        @Crd.Spec.AdditionalPrinterColumn(
+                                name = "Ready",
+                                description = "The state of the custom resource",
+                                jsonPath = ".status.conditions[?(@.type==\"Ready\")].status",
+                                type = "string"
                         )
                 }
         )
@@ -75,16 +80,20 @@ import static java.util.Collections.unmodifiableList;
 @Buildable(
         editableEnabled = false,
         builderPackage = Constants.FABRIC8_KUBERNETES_API,
-        inline = @Inline(type = Doneable.class, prefix = "Doneable", value = "done")
+        refs = {@BuildableReference(ObjectMeta.class)}
 )
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @JsonPropertyOrder({"apiVersion", "kind", "metadata", "spec", "status"})
 @EqualsAndHashCode
 @ToString
-public class KafkaConnector extends CustomResource implements UnknownPropertyPreserving, HasStatus<KafkaConnectorStatus> {
+@Version(Constants.V1BETA2)
+@Group(Constants.STRIMZI_GROUP)
+public class KafkaConnector extends CustomResource<KafkaConnectorSpec, KafkaConnectorStatus> implements Namespaced, UnknownPropertyPreserving {
     private static final long serialVersionUID = 1L;
+    public static final String V1BETA2 = Constants.V1BETA2;
     public static final String V1ALPHA1 = Constants.V1ALPHA1;
-    public static final List<String> VERSIONS = unmodifiableList(asList(V1ALPHA1));
+    public static final String CONSUMED_VERSION = V1BETA2;
+    public static final List<String> VERSIONS = unmodifiableList(asList(V1BETA2, V1ALPHA1));
     public static final String SCOPE = "Namespaced";
     public static final String CRD_API_VERSION = Constants.V1BETA1_API_VERSION;
     public static final String RESOURCE_PLURAL = "kafkaconnectors";
@@ -121,19 +130,21 @@ public class KafkaConnector extends CustomResource implements UnknownPropertyPre
     @JsonInclude(JsonInclude.Include.NON_EMPTY)
     @Override
     public ObjectMeta getMetadata() {
-        return super.getMetadata();
+        return metadata;
     }
 
     @Override
     public void setMetadata(ObjectMeta metadata) {
-        super.setMetadata(metadata);
+        this.metadata = metadata;
     }
 
+    @Override
     @Description("The specification of the Kafka Connector.")
     public KafkaConnectorSpec getSpec() {
         return spec;
     }
 
+    @Override
     public void setSpec(KafkaConnectorSpec spec) {
         this.spec = spec;
     }
@@ -144,6 +155,7 @@ public class KafkaConnector extends CustomResource implements UnknownPropertyPre
         return status;
     }
 
+    @Override
     public void setStatus(KafkaConnectorStatus status) {
         this.status = status;
     }

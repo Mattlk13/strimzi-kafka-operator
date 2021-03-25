@@ -9,7 +9,6 @@ import io.fabric8.kubernetes.client.KubernetesClient;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.strimzi.api.kafka.Crds;
 import io.strimzi.api.kafka.KafkaConnectorList;
-import io.strimzi.api.kafka.model.DoneableKafkaConnector;
 import io.strimzi.api.kafka.model.KafkaConnector;
 import io.strimzi.api.kafka.model.KafkaConnectorBuilder;
 import io.strimzi.operator.KubernetesVersion;
@@ -116,10 +115,10 @@ public class KafkaConnectorIT {
         KafkaConnectApiImpl connectClient = new KafkaConnectApiImpl(vertx);
 
         KubernetesClient client = new MockKube()
-                .withCustomResourceDefinition(Crds.kafkaConnector(), KafkaConnector.class, KafkaConnectorList.class, DoneableKafkaConnector.class)
+                .withCustomResourceDefinition(Crds.kafkaConnector(), KafkaConnector.class, KafkaConnectorList.class)
                 .end()
                 .build();
-        PlatformFeaturesAvailability pfa = new PlatformFeaturesAvailability(false, KubernetesVersion.V1_14);
+        PlatformFeaturesAvailability pfa = new PlatformFeaturesAvailability(false, KubernetesVersion.V1_20);
 
         String namespace = "ns";
         String connectorName = "my-connector";
@@ -165,9 +164,9 @@ public class KafkaConnectorIT {
 
         KafkaConnectAssemblyOperator operator = new KafkaConnectAssemblyOperator(vertx, pfa,
                 new ResourceOperatorSupplier(
-                        null, null, null, null, null, null, null, null, null, null, null,
-                        null, null, null, null, null, null, null, null, null, null, null,
-                        null, connectCrdOperator, null, null, null, null, null, metrics, null),
+                        null, null, null, null, null, null, null, null, null, null, null, null,
+                        null, null, null, null, null, null, null, null, null, null, null, null,
+                        null, null, connectCrdOperator, null, null, null, null, null, metrics, null),
                 ClusterOperatorConfig.fromMap(Collections.emptyMap(), KafkaVersionTestUtils.getKafkaVersionLookup()),
             connect -> new KafkaConnectApiImpl(vertx),
             connectCluster.getPort() + 2

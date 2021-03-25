@@ -4,6 +4,7 @@
  */
 package io.strimzi.operator.cluster.model;
 
+import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.Container;
 import io.fabric8.kubernetes.api.model.EnvVar;
 import io.fabric8.kubernetes.api.model.EnvVarBuilder;
@@ -14,6 +15,7 @@ import io.strimzi.api.kafka.model.EntityOperatorSpecBuilder;
 import io.strimzi.api.kafka.model.EntityUserOperatorSpec;
 import io.strimzi.api.kafka.model.EntityUserOperatorSpecBuilder;
 import io.strimzi.api.kafka.model.InlineLogging;
+import io.strimzi.api.kafka.model.JmxPrometheusExporterMetrics;
 import io.strimzi.api.kafka.model.Kafka;
 import io.strimzi.api.kafka.model.KafkaBuilder;
 import io.strimzi.api.kafka.model.Probe;
@@ -26,6 +28,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
+import static io.strimzi.test.TestUtils.map;
 import static java.util.Collections.emptyMap;
 import static java.util.Collections.singletonMap;
 import static org.hamcrest.CoreMatchers.is;
@@ -64,9 +67,14 @@ public class EntityUserOperatorTest {
 
     private final String uoWatchedNamespace = "my-user-namespace";
     private final String uoImage = "my-user-operator-image";
+    private final String secretPrefix = "strimzi-";
     private final int uoReconciliationInterval = 90;
     private final int uoZookeeperSessionTimeout = 20;
 
+    private final String metricsCmJson = "{\"animal\":\"wombat\"}";
+    private final String metricsCMName = "metrics-cm";
+    private final ConfigMap metricsCM = io.strimzi.operator.cluster.TestUtils.getJmxMetricsCm(metricsCmJson, metricsCMName);
+    private final JmxPrometheusExporterMetrics jmxMetricsConfig = io.strimzi.operator.cluster.TestUtils.getJmxPrometheusExporterMetrics(AbstractModel.ANCILLARY_CM_KEY_METRICS, metricsCMName);
     private final List<SystemProperty> javaSystemProperties = new ArrayList<SystemProperty>() {{
             add(new SystemPropertyBuilder().withName("javax.net.debug").withValue("verbose").build());
             add(new SystemPropertyBuilder().withName("something.else").withValue("42").build());
@@ -77,6 +85,7 @@ public class EntityUserOperatorTest {
             .withImage(uoImage)
             .withReconciliationIntervalSeconds(uoReconciliationInterval)
             .withZookeeperSessionTimeoutSeconds(uoZookeeperSessionTimeout)
+            .withSecretPrefix(secretPrefix)
             .withLivenessProbe(livenessProbe)
             .withReadinessProbe(readinessProbe)
             .withLogging(userOperatorLogging)
@@ -117,6 +126,7 @@ public class EntityUserOperatorTest {
         expected.add(new EnvVarBuilder().withName(EntityUserOperator.ENV_VAR_CLIENTS_CA_RENEWAL).withValue(Integer.toString(CertificateAuthority.DEFAULT_CERTS_RENEWAL_DAYS)).build());
         expected.add(new EnvVarBuilder().withName(EntityUserOperator.ENV_VAR_STRIMZI_JAVA_OPTS).withValue("-Xmx256m").build());
         expected.add(new EnvVarBuilder().withName(EntityUserOperator.ENV_VAR_STRIMZI_JAVA_SYSTEM_PROPERTIES).withValue("-Djavax.net.debug=verbose -Dsomething.else=42").build());
+        expected.add(new EnvVarBuilder().withName(EntityUserOperator.ENV_VAR_SECRET_PREFIX).withValue(secretPrefix).build());
 
         return expected;
     }
@@ -156,6 +166,7 @@ public class EntityUserOperatorTest {
         assertThat(entityUserOperator.getKafkaBootstrapServers(), is(String.format("%s:%d", KafkaCluster.serviceName(cluster), EntityUserOperatorSpec.DEFAULT_BOOTSTRAP_SERVERS_PORT)));
         assertThat(entityUserOperator.getLogging().getType(), is(userOperatorLogging.getType()));
         assertThat(((InlineLogging) entityUserOperator.getLogging()).getLoggers(), is(userOperatorLogging.getLoggers()));
+        assertThat(entityUserOperator.getSecretPrefix(), is(secretPrefix));
     }
 
     @Test
@@ -174,7 +185,7 @@ public class EntityUserOperatorTest {
         EntityUserOperator entityUserOperator = EntityUserOperator.fromCrd(resource);
 
         assertThat(entityUserOperator.getWatchedNamespace(), is(namespace));
-        assertThat(entityUserOperator.getImage(), is("strimzi/operator:latest"));
+        assertThat(entityUserOperator.getImage(), is("quay.io/strimzi/operator:latest"));
         assertThat(entityUserOperator.getReconciliationIntervalMs(), is(EntityUserOperatorSpec.DEFAULT_FULL_RECONCILIATION_INTERVAL_SECONDS * 1000));
         assertThat(entityUserOperator.getZookeeperSessionTimeoutMs(), is(EntityUserOperatorSpec.DEFAULT_ZOOKEEPER_SESSION_TIMEOUT_SECONDS * 1000));
         assertThat(entityUserOperator.readinessProbeOptions.getInitialDelaySeconds(), is(EntityUserOperatorSpec.DEFAULT_HEALTHCHECK_DELAY));
@@ -184,6 +195,7 @@ public class EntityUserOperatorTest {
         assertThat(entityUserOperator.getZookeeperConnect(), is(EntityUserOperator.defaultZookeeperConnect(cluster)));
         assertThat(entityUserOperator.getKafkaBootstrapServers(), is(EntityUserOperator.defaultBootstrapServers(cluster)));
         assertThat(entityUserOperator.getLogging(), is(nullValue()));
+        assertThat(entityUserOperator.getSecretPrefix(), is(EntityUserOperatorSpec.DEFAULT_SECRET_PREFIX));
     }
 
     @Test
@@ -224,8 +236,11 @@ public class EntityUserOperatorTest {
         assertThat(container.getPorts().get(0).getContainerPort(), is(Integer.valueOf(EntityUserOperator.HEALTHCHECK_PORT)));
         assertThat(container.getPorts().get(0).getName(), is(EntityUserOperator.HEALTHCHECK_PORT_NAME));
         assertThat(container.getPorts().get(0).getProtocol(), is("TCP"));
-        assertThat(container.getVolumeMounts().get(0).getMountPath(), is("/opt/user-operator/custom-config/"));
-        assertThat(container.getVolumeMounts().get(0).getName(), is("entity-user-operator-metrics-and-logging"));
+        assertThat(EntityOperatorTest.volumeMounts(container.getVolumeMounts()), is(map(
+                EntityUserOperator.USER_OPERATOR_TMP_DIRECTORY_DEFAULT_VOLUME_NAME, AbstractModel.STRIMZI_TMP_DIRECTORY_DEFAULT_MOUNT_PATH,
+                "entity-user-operator-metrics-and-logging", "/opt/user-operator/custom-config/",
+                EntityOperator.TLS_SIDECAR_CA_CERTS_VOLUME_NAME, EntityOperator.TLS_SIDECAR_CA_CERTS_VOLUME_MOUNT,
+                EntityOperator.TLS_SIDECAR_EO_CERTS_VOLUME_NAME, EntityOperator.TLS_SIDECAR_EO_CERTS_VOLUME_MOUNT)));
     }
 
     @Test
@@ -265,8 +280,9 @@ public class EntityUserOperatorTest {
     public void testEntityUserOperatorEnvVarValidityAndRenewal() {
         int validity = 100;
         int renewal = 42;
+
         Kafka kafkaAssembly = new KafkaBuilder(ResourceUtils.createKafka(namespace, cluster, replicas,
-                image, healthDelay, healthTimeout, singletonMap("animal", "wombat"), singletonMap("foo", "bar"), emptyMap()))
+                image, healthDelay, healthTimeout, singletonMap("animal", "wombat"), jmxMetricsConfig, singletonMap("foo", "bar"), emptyMap()))
                 .editSpec()
                 .withNewClientsCa()
                 .withRenewalDays(renewal)
@@ -286,10 +302,27 @@ public class EntityUserOperatorTest {
     }
 
     @Test
-    public void testRoleBinding()   {
-        RoleBinding binding = entityUserOperator.generateRoleBinding(namespace, uoWatchedNamespace);
+    public void testRoleBindingInOtherNamespace()   {
+        RoleBinding binding = entityUserOperator.generateRoleBindingForRole(namespace, uoWatchedNamespace);
 
         assertThat(binding.getSubjects().get(0).getNamespace(), is(namespace));
         assertThat(binding.getMetadata().getNamespace(), is(uoWatchedNamespace));
+        assertThat(binding.getMetadata().getOwnerReferences().size(), is(0));
+
+        assertThat(binding.getRoleRef().getKind(), is("Role"));
+        assertThat(binding.getRoleRef().getName(), is("foo-entity-operator"));
     }
+
+    @Test
+    public void testRoleBindingInTheSameNamespace() {
+        RoleBinding binding = entityUserOperator.generateRoleBindingForRole(namespace, namespace);
+
+        assertThat(binding.getSubjects().get(0).getNamespace(), is(namespace));
+        assertThat(binding.getMetadata().getNamespace(), is(namespace));
+        assertThat(binding.getMetadata().getOwnerReferences().size(), is(1));
+
+        assertThat(binding.getRoleRef().getKind(), is("Role"));
+        assertThat(binding.getRoleRef().getName(), is("foo-entity-operator"));
+    }
+
 }

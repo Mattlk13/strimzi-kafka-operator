@@ -9,14 +9,19 @@ import io.fabric8.kubernetes.api.model.SecretBuilder;
 import io.strimzi.operator.common.model.Labels;
 import io.strimzi.systemtest.Constants;
 import io.strimzi.systemtest.resources.ResourceOperation;
+import io.strimzi.systemtest.security.CertAndKeyFiles;
 import io.strimzi.test.TestUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.security.cert.CertificateException;
+import java.security.cert.CertificateFactory;
+import java.security.cert.X509Certificate;
 import java.util.Base64;
 import java.util.Collections;
 import java.util.HashMap;
@@ -46,6 +51,18 @@ public class SecretUtils {
         LOGGER.info("Secret {} created", secretName);
     }
 
+    public static void waitForSecretDeletion(String secretName) {
+        waitForSecretDeletion(secretName, () -> { });
+    }
+
+    public static void waitForSecretDeletion(String secretName, Runnable onTimeout) {
+        LOGGER.info("Waiting for Secret deletion {}", secretName);
+        TestUtils.waitFor("Expected secret " + secretName + " deleted", Constants.POLL_INTERVAL_FOR_RESOURCE_READINESS, READINESS_TIMEOUT,
+            () -> kubeClient().getSecret(secretName) == null,
+            onTimeout);
+        LOGGER.info("Secret {} deleted", secretName);
+    }
+
     public static void createSecret(String secretName, String dataKey, String dataValue) {
         LOGGER.info("Creating secret {}", secretName);
         kubeClient().createSecret(new SecretBuilder()
@@ -61,6 +78,10 @@ public class SecretUtils {
 
     public static void createSecretFromFile(String pathToOrigin, String key, String name, String namespace) {
         createSecretFromFile(Collections.singletonMap(key, pathToOrigin), name, namespace, null);
+    }
+
+    public static void createSecretFromFile(String pathToOrigin, String key, String name, String namespace, Map<String, String> labels) {
+        createSecretFromFile(Collections.singletonMap(key, pathToOrigin), name, namespace, labels);
     }
 
     public static void createSecretFromFile(Map<String, String> certFilesPath, String name, String namespace) {
@@ -111,14 +132,14 @@ public class SecretUtils {
         LOGGER.info("Secret {} deleted", clusterName);
     }
 
-    public static void createCustomSecret(String name, String clusterName, String namespace, String certPath, String keyPath) {
+    public static void createCustomSecret(String name, String clusterName, String namespace, CertAndKeyFiles certAndKeyFiles) {
         Map<String, String> secretLabels = new HashMap<>();
         secretLabels.put(Labels.STRIMZI_CLUSTER_LABEL, clusterName);
         secretLabels.put(Labels.STRIMZI_KIND_LABEL, "Kafka");
 
         Map<String, String> certsPaths = new HashMap<>();
-        certsPaths.put("ca.crt", certPath);
-        certsPaths.put("ca.key", keyPath);
+        certsPaths.put("ca.crt", certAndKeyFiles.getCertPath());
+        certsPaths.put("ca.key", certAndKeyFiles.getKeyPath());
 
         SecretUtils.createSecretFromFile(certsPaths, name, namespace, secretLabels);
         waitForSecretReady(name);
@@ -145,9 +166,22 @@ public class SecretUtils {
         kubeClient().getClient().secrets().inNamespace(namespace).withName(secretName).delete();
 
         LOGGER.info("Waiting for Secret: {} to be deleted", secretName);
-        TestUtils.waitFor(String.format("Deletion of secret: {}", secretName), Constants.GLOBAL_POLL_INTERVAL, DELETION_TIMEOUT,
+        TestUtils.waitFor(String.format("Deletion of secret: %s", secretName), Constants.GLOBAL_POLL_INTERVAL, DELETION_TIMEOUT,
             () -> kubeClient().getSecret(secretName) == null);
 
         LOGGER.info("Secret: {} successfully deleted", secretName);
+    }
+
+    public static X509Certificate getCertificateFromSecret(Secret secret, String dataKey) {
+        String caCert = secret.getData().get(dataKey);
+        byte[] decoded = Base64.getDecoder().decode(caCert);
+        X509Certificate cacert = null;
+        try {
+            cacert = (X509Certificate)
+                    CertificateFactory.getInstance("X.509").generateCertificate(new ByteArrayInputStream(decoded));
+        } catch (CertificateException e) {
+            e.printStackTrace();
+        }
+        return cacert;
     }
 }

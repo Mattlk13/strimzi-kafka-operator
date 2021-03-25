@@ -12,15 +12,18 @@
     <Package name="io.strimzi.certs"/>
   </Match>
   <Match>
-    <Class name="~io\.strimzi\.api\.kafka\.model\..+(Builder|FluentImpl)(\$.*)?" />
+    <Bug pattern="REC_CATCH_EXCEPTION"/>
+    <Class name="io.strimzi.operator.user.operator.KafkaUserQuotasOperator"/>
+    <Method name="describeUserQuotas"/>
   </Match>
   <Match>
-    <Class name="~io\.strimzi\.api\.kafka\.model\.(Doneable).+(\$.*)?" />
+    <Class name="~io\.strimzi\.api\.kafka\.model\..+(Builder|FluentImpl)(\$.*)?" />
   </Match>
   <Match>
     <Class name="~io\.fabric8\.kubernetes\.api\.model\..+(Builder|FluentImpl)(\$.*)?" />
   </Match>
   <Match>
-    <Class name="~io\.fabric8\.kubernetes\.api\.model\.(Doneable).+(\$.*)?" />
+    <Bug pattern="RCN_REDUNDANT_NULLCHECK_WOULD_HAVE_BEEN_A_NPE"/>
+    <Class name="~io\.strimzi\.certs\.OpenSslCertManager" />
   </Match>
 </FindBugsFilter>

@@ -9,8 +9,6 @@ import io.fabric8.kubernetes.api.model.ServiceAccount;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.dsl.Resource;
 import io.strimzi.api.kafka.KafkaMirrorMakerList;
-import io.strimzi.api.kafka.model.DoneableKafkaMirrorMaker;
-import io.strimzi.api.kafka.model.ExternalLogging;
 import io.strimzi.api.kafka.model.KafkaMirrorMaker;
 import io.strimzi.api.kafka.model.KafkaMirrorMakerResources;
 import io.strimzi.api.kafka.model.KafkaMirrorMakerSpec;
@@ -25,6 +23,7 @@ import io.strimzi.operator.common.Annotations;
 import io.strimzi.operator.common.PasswordGenerator;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.ReconciliationException;
+import io.strimzi.operator.common.Util;
 import io.strimzi.operator.common.operator.resource.DeploymentOperator;
 import io.strimzi.operator.common.operator.resource.ReconcileResult;
 import io.strimzi.operator.common.operator.resource.StatusUtils;
@@ -43,7 +42,7 @@ import java.util.Map;
  *     <li>A Kafka Mirror Maker Deployment and related Services</li>
  * </ul>
  */
-public class KafkaMirrorMakerAssemblyOperator extends AbstractAssemblyOperator<KubernetesClient, KafkaMirrorMaker, KafkaMirrorMakerList, DoneableKafkaMirrorMaker, Resource<KafkaMirrorMaker, DoneableKafkaMirrorMaker>, KafkaMirrorMakerSpec, KafkaMirrorMakerStatus> {
+public class KafkaMirrorMakerAssemblyOperator extends AbstractAssemblyOperator<KubernetesClient, KafkaMirrorMaker, KafkaMirrorMakerList, Resource<KafkaMirrorMaker>, KafkaMirrorMakerSpec, KafkaMirrorMakerStatus> {
 
     private static final Logger log = LogManager.getLogger(KafkaMirrorMakerAssemblyOperator.class.getName());
 
@@ -80,12 +79,7 @@ public class KafkaMirrorMakerAssemblyOperator extends AbstractAssemblyOperator<K
             return Future.failedFuture(new ReconciliationException(kafkaMirrorMakerStatus, e));
         }
 
-        ConfigMap logAndMetricsConfigMap = mirror.generateMetricsAndLogConfigMap(mirror.getLogging() instanceof ExternalLogging ?
-                configMapOperations.get(namespace, ((ExternalLogging) mirror.getLogging()).getName()) :
-                null);
-
         Map<String, String> annotations = new HashMap<>(1);
-        annotations.put(Annotations.STRIMZI_LOGGING_ANNOTATION, logAndMetricsConfigMap.getData().get(mirror.ANCILLARY_CM_KEY_LOG_CONFIG));
 
         Promise<KafkaMirrorMakerStatus> createOrUpdatePromise = Promise.promise();
 
@@ -94,7 +88,12 @@ public class KafkaMirrorMakerAssemblyOperator extends AbstractAssemblyOperator<K
         log.debug("{}: Updating Kafka Mirror Maker cluster", reconciliation);
         mirrorMakerServiceAccount(namespace, mirror)
                 .compose(i -> deploymentOperations.scaleDown(namespace, mirror.getName(), mirror.getReplicas()))
-                .compose(i -> configMapOperations.reconcile(namespace, mirror.getAncillaryConfigMapName(), logAndMetricsConfigMap))
+                .compose(i -> Util.metricsAndLogging(configMapOperations, namespace, mirror.getLogging(), mirror.getMetricsConfigInCm()))
+                .compose(metricsAndLoggingCm -> {
+                    ConfigMap logAndMetricsConfigMap = mirror.generateMetricsAndLogConfigMap(metricsAndLoggingCm);
+                    annotations.put(Annotations.STRIMZI_LOGGING_ANNOTATION, logAndMetricsConfigMap.getData().get(mirror.ANCILLARY_CM_KEY_LOG_CONFIG));
+                    return configMapOperations.reconcile(namespace, mirror.getAncillaryConfigMapName(), logAndMetricsConfigMap);
+                })
                 .compose(i -> podDisruptionBudgetOperator.reconcile(namespace, mirror.getName(), mirror.generatePodDisruptionBudget()))
                 .compose(i -> deploymentOperations.reconcile(namespace, mirror.getName(), mirror.generateDeployment(annotations, pfa.isOpenshift(), imagePullPolicy, imagePullSecrets)))
                 .compose(i -> deploymentOperations.scaleUp(namespace, mirror.getName(), mirror.getReplicas()))

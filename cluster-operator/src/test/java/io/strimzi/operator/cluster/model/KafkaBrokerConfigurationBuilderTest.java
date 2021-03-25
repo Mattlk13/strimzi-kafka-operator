@@ -26,6 +26,7 @@ import io.strimzi.api.kafka.model.storage.PersistentClaimStorageBuilder;
 import io.strimzi.api.kafka.model.storage.SingleVolumeStorage;
 import io.strimzi.api.kafka.model.storage.Storage;
 import io.strimzi.kafka.oauth.server.ServerConfig;
+import io.strimzi.operator.cluster.operator.resource.cruisecontrol.CruiseControlConfigurationParameters;
 import org.hamcrest.Description;
 import org.hamcrest.Matcher;
 import org.hamcrest.TypeSafeMatcher;
@@ -34,15 +35,18 @@ import org.junit.jupiter.api.Test;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeSet;
 
 import static io.strimzi.operator.cluster.model.KafkaBrokerConfigurationBuilderTest.IsEquivalent.isEquivalent;
 import static java.util.Arrays.asList;
 import static java.util.Collections.emptyList;
 import static java.util.Collections.singletonList;
+import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.equalTo;
@@ -60,7 +64,7 @@ public class KafkaBrokerConfigurationBuilderTest {
     @Test
     public void testNoCruiseControl()  {
         String configuration = new KafkaBrokerConfigurationBuilder()
-                .withCruiseControl("my-cluster", null, "1", "1")
+                .withCruiseControl("my-cluster", null, "1", "1", "1")
                 .build();
 
         assertThat(configuration, isEquivalent(""));
@@ -71,24 +75,25 @@ public class KafkaBrokerConfigurationBuilderTest {
         CruiseControlSpec cruiseControlSpec = new CruiseControlSpecBuilder().build();
 
         String configuration = new KafkaBrokerConfigurationBuilder()
-                .withCruiseControl("my-cluster", cruiseControlSpec, "1", "1")
+                .withCruiseControl("my-cluster", cruiseControlSpec, "1", "1", "1")
                 .build();
 
-        assertThat(configuration, isEquivalent(
-                "cruise.control.metrics.topic=strimzi.cruisecontrol.metrics\n" +
-                "cruise.control.metrics.reporter.ssl.endpoint.identification.algorithm=HTTPS\n" +
-                "cruise.control.metrics.reporter.bootstrap.servers=my-cluster-kafka-brokers:9091\n" +
-                "cruise.control.metrics.reporter.security.protocol=SSL\n" +
-                "cruise.control.metrics.reporter.ssl.keystore.type=PKCS12\n" +
-                "cruise.control.metrics.reporter.ssl.keystore.location=/tmp/kafka/cluster.keystore.p12\n" +
-                "cruise.control.metrics.reporter.ssl.keystore.password=${CERTS_STORE_PASSWORD}\n" +
-                "cruise.control.metrics.reporter.ssl.truststore.type=PKCS12\n" +
-                "cruise.control.metrics.reporter.ssl.truststore.location=/tmp/kafka/cluster.truststore.p12\n" +
-                "cruise.control.metrics.reporter.ssl.truststore.password=${CERTS_STORE_PASSWORD}\n" +
-                "cruise.control.metrics.topic.auto.create=true\n" +
-                "cruise.control.metrics.reporter.kubernetes.mode=true\n" +
-                "cruise.control.metrics.topic.num.partitions=1\n" +
-                "cruise.control.metrics.topic.replication.factor=1"));
+        assertThat(configuration, containsString(
+                CruiseControlConfigurationParameters.METRICS_TOPIC_NAME + "=strimzi.cruisecontrol.metrics\n" +
+                CruiseControlConfigurationParameters.METRICS_REPORTER_SSL_ENDPOINT_ID_ALGO + "=HTTPS\n" +
+                CruiseControlConfigurationParameters.METRICS_REPORTER_BOOTSTRAP_SERVERS + "=my-cluster-kafka-brokers:9091\n" +
+                CruiseControlConfigurationParameters.METRICS_REPORTER_SECURITY_PROTOCOL + "=SSL\n" +
+                CruiseControlConfigurationParameters.METRICS_REPORTER_SSL_KEYSTORE_TYPE + "=PKCS12\n" +
+                CruiseControlConfigurationParameters.METRICS_REPORTER_SSL_KEYSTORE_LOCATION + "=/tmp/kafka/cluster.keystore.p12\n" +
+                CruiseControlConfigurationParameters.METRICS_REPORTER_SSL_KEYSTORE_PASSWORD + "=${CERTS_STORE_PASSWORD}\n" +
+                CruiseControlConfigurationParameters.METRICS_REPORTER_SSL_TRUSTSTORE_TYPE + "=PKCS12\n" +
+                CruiseControlConfigurationParameters.METRICS_REPORTER_SSL_TRUSTSTORE_LOCATION + "=/tmp/kafka/cluster.truststore.p12\n" +
+                CruiseControlConfigurationParameters.METRICS_REPORTER_SSL_TRUSTSTORE_PASSWORD + "=${CERTS_STORE_PASSWORD}\n" +
+                CruiseControlConfigurationParameters.METRICS_TOPIC_AUTO_CREATE + "=true\n" +
+                CruiseControlConfigurationParameters.METRICS_REPORTER_KUBERNETES_MODE + "=true\n" +
+                CruiseControlConfigurationParameters.METRICS_TOPIC_NUM_PARTITIONS + "=1\n" +
+                CruiseControlConfigurationParameters.METRICS_TOPIC_REPLICATION_FACTOR + "=1\n" +
+                CruiseControlConfigurationParameters.METRICS_TOPIC_MIN_ISR + "=1"));
     }
 
     @Test
@@ -196,7 +201,6 @@ public class KafkaBrokerConfigurationBuilderTest {
                 .build();
 
         assertThat(configuration, isEquivalent("authorizer.class.name=io.strimzi.kafka.oauth.server.authorizer.KeycloakRBACAuthorizer\n" +
-                "principal.builder.class=io.strimzi.kafka.oauth.server.authorizer.JwtKafkaPrincipalBuilder\n" +
                 "strimzi.authorization.token.endpoint.uri=http://token-endpoint-uri\n" +
                 "strimzi.authorization.client.id=my-client-id\n" +
                 "strimzi.authorization.delegate.to.kafka.acl=false\n" +
@@ -229,7 +233,6 @@ public class KafkaBrokerConfigurationBuilderTest {
                 .build();
 
         assertThat(configuration, isEquivalent("authorizer.class.name=io.strimzi.kafka.oauth.server.authorizer.KeycloakRBACAuthorizer\n" +
-                "principal.builder.class=io.strimzi.kafka.oauth.server.authorizer.JwtKafkaPrincipalBuilder\n" +
                 "strimzi.authorization.token.endpoint.uri=http://token-endpoint-uri\n" +
                 "strimzi.authorization.client.id=my-client-id\n" +
                 "strimzi.authorization.delegate.to.kafka.acl=false\n" +
@@ -402,6 +405,70 @@ public class KafkaBrokerConfigurationBuilderTest {
                 "listeners=REPLICATION-9091://0.0.0.0:9091",
                 "advertised.listeners=REPLICATION-9091://my-cluster-kafka-${STRIMZI_BROKER_ID}.my-cluster-kafka-brokers.my-namespace.svc:9091",
                 "listener.security.protocol.map=REPLICATION-9091:SSL",
+                "inter.broker.listener.name=REPLICATION-9091",
+                "sasl.enabled.mechanisms=",
+                "ssl.secure.random.implementation=SHA1PRNG",
+                "ssl.endpoint.identification.algorithm=HTTPS"));
+    }
+
+    @Test
+    public void testConnectionLimits()  {
+        GenericKafkaListener listener1 = new GenericKafkaListenerBuilder()
+                .withName("listener1")
+                .withPort(9100)
+                .withType(KafkaListenerType.INTERNAL)
+                .withTls(false)
+                .withNewConfiguration()
+                    .withMaxConnections(100)
+                    .withMaxConnectionCreationRate(10)
+                .endConfiguration()
+                .build();
+
+        GenericKafkaListener listener2 = new GenericKafkaListenerBuilder()
+                .withName("listener2")
+                .withPort(9101)
+                .withType(KafkaListenerType.INTERNAL)
+                .withTls(false)
+                .withNewConfiguration()
+                    .withMaxConnections(1000)
+                    .withMaxConnectionCreationRate(50)
+                .endConfiguration()
+                .build();
+
+        GenericKafkaListener listener3 = new GenericKafkaListenerBuilder()
+                .withName("listener3")
+                .withPort(9102)
+                .withType(KafkaListenerType.INTERNAL)
+                .withTls(false)
+                .withNewConfiguration()
+                .endConfiguration()
+                .build();
+
+        GenericKafkaListener listener4 = new GenericKafkaListenerBuilder()
+                .withName("listener4")
+                .withPort(9103)
+                .withType(KafkaListenerType.INTERNAL)
+                .withTls(false)
+                .build();
+
+        String configuration = new KafkaBrokerConfigurationBuilder()
+                .withListeners("my-cluster", "my-namespace", asList(listener1, listener2, listener3, listener4))
+                .build();
+
+        assertThat(configuration, isEquivalent("listener.name.replication-9091.ssl.keystore.location=/tmp/kafka/cluster.keystore.p12",
+                "listener.name.replication-9091.ssl.keystore.password=${CERTS_STORE_PASSWORD}",
+                "listener.name.replication-9091.ssl.keystore.type=PKCS12",
+                "listener.name.replication-9091.ssl.truststore.location=/tmp/kafka/cluster.truststore.p12",
+                "listener.name.replication-9091.ssl.truststore.password=${CERTS_STORE_PASSWORD}",
+                "listener.name.replication-9091.ssl.truststore.type=PKCS12",
+                "listener.name.replication-9091.ssl.client.auth=required",
+                "listener.name.listener1-9100.max.connections=100",
+                "listener.name.listener1-9100.max.connection.creation.rate=10",
+                "listener.name.listener2-9101.max.connections=1000",
+                "listener.name.listener2-9101.max.connection.creation.rate=50",
+                "listeners=REPLICATION-9091://0.0.0.0:9091,LISTENER1-9100://0.0.0.0:9100,LISTENER2-9101://0.0.0.0:9101,LISTENER3-9102://0.0.0.0:9102,LISTENER4-9103://0.0.0.0:9103",
+                "advertised.listeners=REPLICATION-9091://my-cluster-kafka-${STRIMZI_BROKER_ID}.my-cluster-kafka-brokers.my-namespace.svc:9091,LISTENER1-9100://${STRIMZI_LISTENER1_9100_ADVERTISED_HOSTNAME}:${STRIMZI_LISTENER1_9100_ADVERTISED_PORT},LISTENER2-9101://${STRIMZI_LISTENER2_9101_ADVERTISED_HOSTNAME}:${STRIMZI_LISTENER2_9101_ADVERTISED_PORT},LISTENER3-9102://${STRIMZI_LISTENER3_9102_ADVERTISED_HOSTNAME}:${STRIMZI_LISTENER3_9102_ADVERTISED_PORT},LISTENER4-9103://${STRIMZI_LISTENER4_9103_ADVERTISED_HOSTNAME}:${STRIMZI_LISTENER4_9103_ADVERTISED_PORT}",
+                "listener.security.protocol.map=REPLICATION-9091:SSL,LISTENER1-9100:PLAINTEXT,LISTENER2-9101:PLAINTEXT,LISTENER3-9102:PLAINTEXT,LISTENER4-9103:PLAINTEXT",
                 "inter.broker.listener.name=REPLICATION-9091",
                 "sasl.enabled.mechanisms=",
                 "ssl.secure.random.implementation=SHA1PRNG",
@@ -904,6 +971,8 @@ public class KafkaBrokerConfigurationBuilderTest {
                     .withNewUserNameClaim("preferred_username")
                     .withMaxSecondsWithoutReauthentication(3600)
                     .withJwksMinRefreshPauseSeconds(5)
+                    .withEnablePlain(true)
+                    .withTokenEndpointUri("http://token")
                 .endKafkaListenerAuthenticationOAuth()
                 .build();
 
@@ -925,9 +994,12 @@ public class KafkaBrokerConfigurationBuilderTest {
                 "sasl.enabled.mechanisms=",
                 "ssl.secure.random.implementation=SHA1PRNG",
                 "ssl.endpoint.identification.algorithm=HTTPS",
+                "principal.builder.class=io.strimzi.kafka.oauth.server.OAuthKafkaPrincipalBuilder",
                 "listener.name.plain-9092.oauthbearer.sasl.server.callback.handler.class=io.strimzi.kafka.oauth.server.JaasServerOauthValidatorCallbackHandler",
                 "listener.name.plain-9092.oauthbearer.sasl.jaas.config=org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginModule required unsecuredLoginStringClaim_sub=\"thePrincipalName\" oauth.valid.issuer.uri=\"http://valid-issuer\" oauth.jwks.endpoint.uri=\"http://jwks\" oauth.jwks.refresh.min.pause.seconds=\"5\" oauth.crypto.provider.bouncycastle=\"true\" oauth.username.claim=\"preferred_username\";",
-                "listener.name.plain-9092.sasl.enabled.mechanisms=OAUTHBEARER",
+                "listener.name.plain-9092.plain.sasl.server.callback.handler.class=io.strimzi.kafka.oauth.server.plain.JaasServerOauthOverPlainValidatorCallbackHandler",
+                "listener.name.plain-9092.plain.sasl.jaas.config=org.apache.kafka.common.security.plain.PlainLoginModule required oauth.valid.issuer.uri=\"http://valid-issuer\" oauth.jwks.endpoint.uri=\"http://jwks\" oauth.jwks.refresh.min.pause.seconds=\"5\" oauth.crypto.provider.bouncycastle=\"true\" oauth.username.claim=\"preferred_username\" oauth.token.endpoint.uri=\"http://token\";",
+                "listener.name.plain-9092.sasl.enabled.mechanisms=OAUTHBEARER,PLAIN",
                 "listener.name.plain-9092.connections.max.reauth.ms=3600000"));
     }
 
@@ -962,7 +1034,8 @@ public class KafkaBrokerConfigurationBuilderTest {
                 "ssl.endpoint.identification.algorithm=HTTPS",
                 "listener.name.plain-9092.oauthbearer.sasl.server.callback.handler.class=io.strimzi.kafka.oauth.server.JaasServerOauthValidatorCallbackHandler",
                 "listener.name.plain-9092.oauthbearer.sasl.jaas.config=org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginModule required unsecuredLoginStringClaim_sub=\"thePrincipalName\" ;",
-                "listener.name.plain-9092.sasl.enabled.mechanisms=OAUTHBEARER"));
+                "listener.name.plain-9092.sasl.enabled.mechanisms=OAUTHBEARER",
+                "principal.builder.class=io.strimzi.kafka.oauth.server.OAuthKafkaPrincipalBuilder"));
     }
 
     @Test
@@ -1007,7 +1080,8 @@ public class KafkaBrokerConfigurationBuilderTest {
                 "ssl.endpoint.identification.algorithm=HTTPS",
                 "listener.name.plain-9092.oauthbearer.sasl.server.callback.handler.class=io.strimzi.kafka.oauth.server.JaasServerOauthValidatorCallbackHandler",
                 "listener.name.plain-9092.oauthbearer.sasl.jaas.config=org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginModule required unsecuredLoginStringClaim_sub=\"thePrincipalName\" oauth.valid.issuer.uri=\"https://valid-issuer\" oauth.jwks.endpoint.uri=\"https://jwks\" oauth.crypto.provider.bouncycastle=\"true\" oauth.username.claim=\"preferred_username\" oauth.ssl.endpoint.identification.algorithm=\"\" oauth.ssl.truststore.location=\"/tmp/kafka/oauth-plain-9092.truststore.p12\" oauth.ssl.truststore.password=\"${CERTS_STORE_PASSWORD}\" oauth.ssl.truststore.type=\"PKCS12\";",
-                "listener.name.plain-9092.sasl.enabled.mechanisms=OAUTHBEARER"));
+                "listener.name.plain-9092.sasl.enabled.mechanisms=OAUTHBEARER",
+                "principal.builder.class=io.strimzi.kafka.oauth.server.OAuthKafkaPrincipalBuilder"));
     }
 
     @Test
@@ -1020,6 +1094,8 @@ public class KafkaBrokerConfigurationBuilderTest {
                 .withNewKafkaListenerAuthenticationOAuth()
                     .withNewValidIssuerUri("https://valid-issuer")
                     .withNewIntrospectionEndpointUri("https://intro")
+                    .withCheckAudience(true)
+                    .withCustomClaimCheck("'kafka-user' in @.roles.client-roles.kafka")
                     .withNewClientId("my-oauth-client")
                     .withNewClientSecret()
                         .withNewSecretName("my-secret")
@@ -1047,8 +1123,9 @@ public class KafkaBrokerConfigurationBuilderTest {
                 "ssl.secure.random.implementation=SHA1PRNG",
                 "ssl.endpoint.identification.algorithm=HTTPS",
                 "listener.name.plain-9092.oauthbearer.sasl.server.callback.handler.class=io.strimzi.kafka.oauth.server.JaasServerOauthValidatorCallbackHandler",
-                "listener.name.plain-9092.oauthbearer.sasl.jaas.config=org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginModule required unsecuredLoginStringClaim_sub=\"thePrincipalName\" oauth.client.id=\"my-oauth-client\" oauth.valid.issuer.uri=\"https://valid-issuer\" oauth.introspection.endpoint.uri=\"https://intro\" oauth.client.secret=\"${STRIMZI_PLAIN_9092_OAUTH_CLIENT_SECRET}\";",
-                "listener.name.plain-9092.sasl.enabled.mechanisms=OAUTHBEARER"));
+                "listener.name.plain-9092.oauthbearer.sasl.jaas.config=org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginModule required unsecuredLoginStringClaim_sub=\"thePrincipalName\" oauth.client.id=\"my-oauth-client\" oauth.valid.issuer.uri=\"https://valid-issuer\" oauth.check.audience=\"true\" oauth.custom.claim.check=\"'kafka-user' in @.roles.client-roles.kafka\" oauth.introspection.endpoint.uri=\"https://intro\" oauth.client.secret=\"${STRIMZI_PLAIN_9092_OAUTH_CLIENT_SECRET}\";",
+                "listener.name.plain-9092.sasl.enabled.mechanisms=OAUTHBEARER",
+                "principal.builder.class=io.strimzi.kafka.oauth.server.OAuthKafkaPrincipalBuilder"));
     }
 
     @Test
@@ -1056,6 +1133,7 @@ public class KafkaBrokerConfigurationBuilderTest {
         KafkaListenerAuthenticationOAuth auth = new KafkaListenerAuthenticationOAuthBuilder()
                 .withValidIssuerUri("http://valid-issuer")
                 .withCheckIssuer(false)
+                .withCheckAudience(true)
                 .withJwksEndpointUri("http://jwks-endpoint")
                 .withIntrospectionEndpointUri("http://introspection-endpoint")
                 .withUserInfoEndpointUri("http://userinfo-endpoint")
@@ -1072,12 +1150,15 @@ public class KafkaBrokerConfigurationBuilderTest {
                 .withValidTokenType("access_token")
                 .withDisableTlsHostnameVerification(true)
                 .withMaxSecondsWithoutReauthentication(3600)
+                .withEnablePlain(true)
+                .withTokenEndpointUri("http://token")
                 .build();
 
         List<String> expectedOptions = new ArrayList<>(5);
         expectedOptions.add(String.format("%s=\"%s\"", ServerConfig.OAUTH_CLIENT_ID, "my-kafka-id"));
         expectedOptions.add(String.format("%s=\"%s\"", ServerConfig.OAUTH_VALID_ISSUER_URI, "http://valid-issuer"));
         expectedOptions.add(String.format("%s=\"%s\"", ServerConfig.OAUTH_CHECK_ISSUER, false));
+        expectedOptions.add(String.format("%s=\"%s\"", ServerConfig.OAUTH_CHECK_AUDIENCE, true));
         expectedOptions.add(String.format("%s=\"%s\"", ServerConfig.OAUTH_JWKS_ENDPOINT_URI, "http://jwks-endpoint"));
         expectedOptions.add(String.format("%s=\"%d\"", ServerConfig.OAUTH_JWKS_REFRESH_SECONDS, 50));
         expectedOptions.add(String.format("%s=\"%d\"", ServerConfig.OAUTH_JWKS_EXPIRY_SECONDS, 160));
@@ -1093,6 +1174,7 @@ public class KafkaBrokerConfigurationBuilderTest {
         expectedOptions.add(String.format("%s=\"%s\"", ServerConfig.OAUTH_VALID_TOKEN_TYPE, "access_token"));
         expectedOptions.add(String.format("%s=\"%s\"", ServerConfig.OAUTH_SSL_ENDPOINT_IDENTIFICATION_ALGORITHM, ""));
 
+        // enablePlain and tokenEndpointUri are handled separately from getOAuthOptions
         List<String> actualOptions = KafkaBrokerConfigurationBuilder.getOAuthOptions(auth);
 
         assertThat(actualOptions, is(equalTo(expectedOptions)));
@@ -1128,7 +1210,7 @@ public class KafkaBrokerConfigurationBuilderTest {
             return expectedLines.containsAll(actualLines) && actualLines.containsAll(expectedLines);
         }
 
-        private String getLinesAsString(List<String> configLines)   {
+        private String getLinesAsString(Collection<String> configLines)   {
             StringWriter stringWriter = new StringWriter();
             PrintWriter writer = new PrintWriter(stringWriter);
 
@@ -1141,7 +1223,15 @@ public class KafkaBrokerConfigurationBuilderTest {
 
         @Override
         public void describeTo(Description description) {
-            description.appendText(getLinesAsString(expectedLines));
+            description.appendText(getLinesAsString(new TreeSet(expectedLines)));
+        }
+
+        @Override
+        protected void describeMismatchSafely(String item, Description mismatchDescription) {
+            mismatchDescription.appendText(" was: \n")
+                    .appendText(getLinesAsString(new TreeSet(ModelUtils.getLinesWithoutCommentsAndEmptyLines(item))))
+                    .appendText("\n\nOriginal value: \n")
+                    .appendText(item);
         }
 
         public static Matcher<String> isEquivalent(String expectedConfig) {

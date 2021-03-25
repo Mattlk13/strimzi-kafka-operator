@@ -46,7 +46,7 @@ import static org.mockito.Mockito.when;
 
 @ExtendWith(VertxExtension.class)
 public class KafkaAssemblyOperatorUnsupportedFieldsTest {
-    private final KubernetesVersion kubernetesVersion = KubernetesVersion.V1_11;
+    private final KubernetesVersion kubernetesVersion = KubernetesVersion.V1_18;
     private final MockCertManager certManager = new MockCertManager();
     private final PasswordGenerator passwordGenerator = new PasswordGenerator(10, "a", "a");
     private final ClusterOperatorConfig config = ResourceUtils.dummyClusterOperatorConfig(VERSIONS);
@@ -212,7 +212,7 @@ public class KafkaAssemblyOperatorUnsupportedFieldsTest {
                             .filter(condition -> "Warning".equals(condition.getType()) && "TopicOperator".equals(condition.getReason()))
                             .findFirst().orElse(null);
                     assertThat(toWarning, is(notNullValue()));
-                    assertThat(toWarning.getMessage(), containsString("Kafka.spec.topicOperator is not supported anymore. Topic operator should be configured at path spec.entityOperator.topicOperator."));
+                    assertThat(toWarning.getMessage(), containsString("Kafka.spec.topicOperator is not supported anymore. Topic operator should be configured using spec.entityOperator.topicOperator."));
 
                     async.flag();
                 })));

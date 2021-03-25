@@ -15,17 +15,26 @@ import io.fabric8.kubernetes.api.model.Secret;
 import io.fabric8.kubernetes.api.model.SecretBuilder;
 import io.fabric8.kubernetes.api.model.Toleration;
 import io.fabric8.kubernetes.api.model.TolerationBuilder;
+import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicyPeer;
 import io.strimzi.api.kafka.model.Kafka;
 import io.strimzi.api.kafka.model.KafkaBuilder;
+import io.strimzi.api.kafka.model.KafkaConnect;
+import io.strimzi.api.kafka.model.KafkaConnectBuilder;
+import io.strimzi.api.kafka.model.listener.arraylistener.GenericKafkaListenerBuilder;
+import io.strimzi.api.kafka.model.listener.arraylistener.KafkaListenerType;
 import io.strimzi.api.kafka.model.storage.EphemeralStorageBuilder;
 import io.strimzi.api.kafka.model.storage.JbodStorageBuilder;
 import io.strimzi.api.kafka.model.storage.PersistentClaimStorageBuilder;
 import io.strimzi.api.kafka.model.storage.Storage;
+import io.strimzi.api.kafka.model.template.DeploymentStrategy;
+import io.strimzi.api.kafka.model.template.DeploymentTemplate;
+import io.strimzi.api.kafka.model.template.DeploymentTemplateBuilder;
 import io.strimzi.api.kafka.model.template.PodDisruptionBudgetTemplate;
 import io.strimzi.api.kafka.model.template.PodDisruptionBudgetTemplateBuilder;
 import io.strimzi.api.kafka.model.template.PodTemplate;
 import io.strimzi.api.kafka.model.template.PodTemplateBuilder;
 import io.strimzi.operator.cluster.KafkaVersionTestUtils;
+import io.strimzi.operator.common.model.Labels;
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
@@ -33,7 +42,9 @@ import java.util.List;
 import java.util.Map;
 
 import static io.strimzi.operator.common.Util.parseMap;
+import static java.util.Collections.emptyMap;
 import static java.util.Collections.singletonList;
+import static java.util.Collections.singletonMap;
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.CoreMatchers.notNullValue;
 import static org.hamcrest.CoreMatchers.nullValue;
@@ -198,6 +209,48 @@ public class ModelUtilsTest {
         assertThat(model.templateTerminationGracePeriodSeconds, is(30));
     }
 
+    @Test
+    public void testParseDeploymentTemplate()  {
+        KafkaConnect connect = new KafkaConnectBuilder()
+                .withNewMetadata()
+                .withName("my-connect-cluster")
+                .withNamespace("my-namespace")
+                .endMetadata()
+                .build();
+
+        DeploymentTemplate template = new DeploymentTemplateBuilder()
+                .withNewMetadata()
+                    .withAnnotations(Collections.singletonMap("annoKey", "annoValue"))
+                    .withLabels(Collections.singletonMap("labelKey", "labelValue"))
+                .endMetadata()
+                .withDeploymentStrategy(DeploymentStrategy.RECREATE)
+                .build();
+
+        Model model = new Model(connect);
+
+        ModelUtils.parseDeploymentTemplate(model, template);
+        assertThat(model.templateDeploymentLabels, is(Collections.singletonMap("labelKey", "labelValue")));
+        assertThat(model.templateDeploymentAnnotations, is(Collections.singletonMap("annoKey", "annoValue")));
+        assertThat(model.templateDeploymentStrategy, is(DeploymentStrategy.RECREATE));
+    }
+
+    @Test
+    public void testParseNullDeploymentTemplate()  {
+        KafkaConnect connect = new KafkaConnectBuilder()
+                .withNewMetadata()
+                    .withName("my-connect-cluster")
+                    .withNamespace("my-namespace")
+                .endMetadata()
+                .build();
+
+        Model model = new Model(connect);
+
+        ModelUtils.parseDeploymentTemplate(model, null);
+        assertThat(model.templateDeploymentAnnotations, is(nullValue()));
+        assertThat(model.templateDeploymentLabels, is(nullValue()));
+        assertThat(model.templateDeploymentStrategy, is(DeploymentStrategy.ROLLING_UPDATE));
+    }
+
     private class Model extends AbstractModel   {
         public Model(HasMetadata resource) {
             super(resource, "model-app");
@@ -342,7 +395,76 @@ public class ModelUtilsTest {
         PodTemplate pt2 = new PodTemplate();
         pt2.setTolerations(singletonList(t2));
 
-        assertThat(ModelUtils.tolerations("tolerations", null, "template.tolerations", pt1),
-                is(ModelUtils.tolerations("tolerations", null, "template.tolerations", pt2)));
+        Kafka kafka = new KafkaBuilder()
+                .withNewMetadata()
+                    .withName("my-cluster")
+                    .withNamespace("my-namespace")
+                .endMetadata()
+                .withNewSpec()
+                    .withNewKafka()
+                        .withReplicas(3)
+                        .withNewEphemeralStorage()
+                        .endEphemeralStorage()
+                        .withNewListeners()
+                            .withGenericKafkaListeners(new GenericKafkaListenerBuilder().withType(KafkaListenerType.INTERNAL).withPort(9092).withName("plain").withTls(false).build())
+                        .endListeners()
+                    .endKafka()
+                .endSpec()
+                .build();
+
+        KafkaCluster model1 = KafkaCluster.fromCrd(kafka, KafkaVersionTestUtils.getKafkaVersionLookup());
+        /*AbstractModel model1 = new AbstractModel(kafka, "test") {
+            @Override
+            protected String getDefaultLogConfigFileName() {
+                return null;
+            }
+
+            @Override
+            protected List<Container> getContainers(ImagePullPolicy imagePullPolicy) {
+                return null;
+            }
+        };*/
+        ModelUtils.parsePodTemplate(model1, pt1);
+
+        KafkaCluster model2 = KafkaCluster.fromCrd(kafka, KafkaVersionTestUtils.getKafkaVersionLookup());
+        /*AbstractModel model2 = new AbstractModel(kafka, "test") {
+            @Override
+            protected String getDefaultLogConfigFileName() {
+                return null;
+            }
+
+            @Override
+            protected List<Container> getContainers(ImagePullPolicy imagePullPolicy) {
+                return null;
+            }
+        };*/
+        ModelUtils.parsePodTemplate(model2, pt2);
+
+        assertThat(model1.getTolerations(), is(model2.getTolerations()));
+    }
+
+    @Test
+    public void testCONetworkPolicyPeerNamespaceSelectorSameNS()  {
+        NetworkPolicyPeer peer = new NetworkPolicyPeer();
+        ModelUtils.setClusterOperatorNetworkPolicyNamespaceSelector(peer, "my-ns", "my-ns", null);
+        assertThat(peer.getNamespaceSelector(), is(nullValue()));
+    }
+
+    @Test
+    public void testCONetworkPolicyPeerNamespaceSelectorDifferentNSNoLabels()  {
+        NetworkPolicyPeer peer = new NetworkPolicyPeer();
+        ModelUtils.setClusterOperatorNetworkPolicyNamespaceSelector(peer, "my-ns", "my-operator-ns", null);
+        assertThat(peer.getNamespaceSelector().getMatchLabels(), is(nullValue()));
+
+        ModelUtils.setClusterOperatorNetworkPolicyNamespaceSelector(peer, "my-ns", "my-operator-ns", Labels.fromMap(emptyMap()));
+        assertThat(peer.getNamespaceSelector().getMatchLabels(), is(nullValue()));
+    }
+
+    @Test
+    public void testCONetworkPolicyPeerNamespaceSelectorDifferentNSWithLabels()  {
+        NetworkPolicyPeer peer = new NetworkPolicyPeer();
+        Labels nsLabels = Labels.fromMap(singletonMap("labelKey", "labelValue"));
+        ModelUtils.setClusterOperatorNetworkPolicyNamespaceSelector(peer, "my-ns", "my-operator-ns", nsLabels);
+        assertThat(peer.getNamespaceSelector().getMatchLabels(), is(nsLabels.toMap()));
     }
 }

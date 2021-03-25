@@ -12,7 +12,7 @@ if [ ${JAVA_MAJOR_VERSION} -eq 11 ] ; then
 fi
 
 export DOCKER_ORG=${DOCKER_ORG:-strimzici}
-export DOCKER_REGISTRY=${DOCKER_REGISTRY:-docker.io}
+export DOCKER_REGISTRY=${DOCKER_REGISTRY:-quay.io}
 export DOCKER_TAG=$COMMIT
 
 make docu_check
@@ -25,13 +25,18 @@ make docker_build
 make docu_html
 make docu_htmlnoheader
 
+# Run tests for strimzi-test-container
+# We need to tag built images even in fork repos to make images available for test container locally
+DOCKER_REGISTRY=quay.io DOCKER_ORG=strimzi DOCKER_TAG=latest make docker_tag
+mvn test -f test-container/pom.xml
+
 if [ ! -e documentation/modules/appendix_crds.adoc ] ; then
     echo "ERROR: documentation/modules/appendix_crds.adoc does not exist!"
     exit 1
 fi
 
-CHANGED_DERIVED=$(git diff --name-status -- install/ helm-charts/ documentation/modules/appendix_crds.adoc cluster-operator/src/main/resources/cluster-roles)
-GENERATED_FILES=$(git ls-files --other --exclude-standard -- install/ helm-charts/ cluster-operator/src/main/resources/cluster-roles)
+CHANGED_DERIVED=$(git diff --name-status -- packaging/install/ packaging/helm-charts/ documentation/modules/appendix_crds.adoc cluster-operator/src/main/resources/cluster-roles)
+GENERATED_FILES=$(git ls-files --other --exclude-standard -- packaging/install/ packaging/helm-charts/ cluster-operator/src/main/resources/cluster-roles api/src/test/resources/io/strimzi/api/kafka/model)
 if [ -n "$CHANGED_DERIVED" ] || [ -n "$GENERATED_FILES" ] ; then
     if [ -n "$CHANGED_DERIVED" ] ; then
         echo "ERROR: Uncommitted changes in derived resources:"
@@ -62,7 +67,7 @@ else
         echo "Main build on master branch or release tag - going to push to Docker Hub, Nexus and website"
         
         echo "Login into Docker Hub ..."
-        docker login -u $DOCKER_USER -p $DOCKER_PASS
+        docker login -u $DOCKER_USER -p $DOCKER_PASS $DOCKER_REGISTRY
 
         export DOCKER_ORG=strimzi
         

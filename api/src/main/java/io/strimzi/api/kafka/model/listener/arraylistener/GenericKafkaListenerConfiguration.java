@@ -18,7 +18,6 @@ import io.sundr.builder.annotations.Buildable;
 import lombok.EqualsAndHashCode;
 
 import java.io.Serializable;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -43,10 +42,13 @@ public class GenericKafkaListenerConfiguration implements Serializable, UnknownP
     private String ingressClass;
     private NodeAddressType preferredNodePortAddressType;
     private ExternalTrafficPolicy externalTrafficPolicy;
-    private List<String> loadBalancerSourceRanges = new ArrayList<>(0);
+    private List<String> loadBalancerSourceRanges;
+    private List<String> finalizers;
     private Boolean useServiceDnsDomain;
     private GenericKafkaListenerConfigurationBootstrap bootstrap;
     private List<GenericKafkaListenerConfigurationBroker> brokers;
+    private Integer maxConnections;
+    private Integer maxConnectionCreationRate;
 
     private Map<String, Object> additionalProperties = new HashMap<>(0);
 
@@ -62,8 +64,8 @@ public class GenericKafkaListenerConfiguration implements Serializable, UnknownP
     }
 
     @Description("Configures the `Ingress` class that defines which `Ingress` controller will be used. " +
-            "If not set, the `Ingress` class is set to `nginx`. " +
-            "This field can be used only with `ingress` type listener.")
+            "This field can be used only with `ingress` type listener. " +
+            "If not specified, the default Ingress controller will be used.")
     @JsonInclude(JsonInclude.Include.NON_NULL)
     @JsonProperty("class")
     public String getIngressClass() {
@@ -112,7 +114,7 @@ public class GenericKafkaListenerConfiguration implements Serializable, UnknownP
     @Description("A list of CIDR ranges (for example `10.0.0.0/8` or `130.211.204.1/32`) from which clients can connect to load balancer type listeners. " +
             "If supported by the platform, traffic through the loadbalancer is restricted to the specified CIDR ranges. " +
             "This field is applicable only for loadbalancer type services and is ignored if the cloud provider does not support the feature. " +
-            "For more information, see https://kubernetes.io/docs/tasks/access-application-cluster/configure-cloud-provider-firewall/" +
+            "For more information, see https://v1-17.docs.kubernetes.io/docs/tasks/access-application-cluster/configure-cloud-provider-firewall/. " +
             "This field can be used only with `loadbalancer` type listener.")
     @JsonInclude(JsonInclude.Include.NON_EMPTY)
     public List<String> getLoadBalancerSourceRanges() {
@@ -123,8 +125,21 @@ public class GenericKafkaListenerConfiguration implements Serializable, UnknownP
         this.loadBalancerSourceRanges = loadBalancerSourceRanges;
     }
 
+    @Description("A list of finalizers which will be configured for the `LoadBalancer` type Services created for this listener. " +
+            "If supported by the platform, the finalizer `service.kubernetes.io/load-balancer-cleanup` to make sure that the external load balancer is deleted together with the service." +
+            "For more information, see https://kubernetes.io/docs/tasks/access-application-cluster/create-external-load-balancer/#garbage-collecting-load-balancers. " +
+            "This field can be used only with `loadbalancer` type listeners.")
+    @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    public List<String> getFinalizers() {
+        return finalizers;
+    }
+
+    public void setFinalizers(List<String> finalizers) {
+        this.finalizers = finalizers;
+    }
+
     @Description("Configures whether the Kubernetes service DNS domain should be used or not. " +
-            "If set to `true`, the generated addresses with contain the service DNS domain suffix " +
+            "If set to `true`, the generated addresses will contain the service DNS domain suffix " +
             "(by default `.cluster.local`, can be configured using environment variable `KUBERNETES_SERVICE_DNS_DOMAIN`). " +
             "Defaults to `false`." +
             "This field can be used only with `internal` type listener.")
@@ -153,6 +168,29 @@ public class GenericKafkaListenerConfiguration implements Serializable, UnknownP
 
     public void setBrokers(List<GenericKafkaListenerConfigurationBroker> brokers) {
         this.brokers = brokers;
+    }
+
+    @Description("The maximum number of connections we allow for this listener in the broker at any time. " +
+            "New connections are blocked if the limit is reached.")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public Integer getMaxConnections() {
+        return maxConnections;
+    }
+
+    public void setMaxConnections(Integer maxConnections) {
+        this.maxConnections = maxConnections;
+    }
+
+    @Description("The maximum connection creation rate we allow in this listener at any time. " +
+            "New connections will be throttled if the limit is reached." +
+            "Supported only on Kafka 2.7.0 and newer.")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public Integer getMaxConnectionCreationRate() {
+        return maxConnectionCreationRate;
+    }
+
+    public void setMaxConnectionCreationRate(Integer maxConnectionCreationRate) {
+        this.maxConnectionCreationRate = maxConnectionCreationRate;
     }
 
     @Override

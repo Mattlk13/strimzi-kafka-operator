@@ -10,15 +10,19 @@ import io.fabric8.kubernetes.api.model.Container;
 import io.fabric8.kubernetes.api.model.EnvVar;
 import io.fabric8.kubernetes.api.model.EnvVarBuilder;
 import io.fabric8.kubernetes.api.model.HasMetadata;
+import io.fabric8.kubernetes.api.model.LabelSelectorBuilder;
 import io.fabric8.kubernetes.api.model.NodeSelectorTermBuilder;
 import io.fabric8.kubernetes.api.model.OwnerReference;
 import io.fabric8.kubernetes.api.model.Toleration;
 import io.fabric8.kubernetes.api.model.TolerationBuilder;
+import io.fabric8.kubernetes.api.model.TopologySpreadConstraint;
+import io.fabric8.kubernetes.api.model.TopologySpreadConstraintBuilder;
 import io.fabric8.kubernetes.api.model.Volume;
 import io.fabric8.kubernetes.api.model.VolumeMount;
 import io.fabric8.kubernetes.api.model.apps.Deployment;
 import io.strimzi.api.kafka.model.ContainerEnvVar;
 import io.strimzi.api.kafka.model.InlineLogging;
+import io.strimzi.api.kafka.model.JmxPrometheusExporterMetrics;
 import io.strimzi.api.kafka.model.Kafka;
 import io.strimzi.api.kafka.model.KafkaBuilder;
 import io.strimzi.api.kafka.model.KafkaExporterResources;
@@ -46,6 +50,7 @@ import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.CoreMatchers.notNullValue;
 import static org.hamcrest.CoreMatchers.nullValue;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.containsInAnyOrder;
 
 public class KafkaExporterTest {
     private final String namespace = "test";
@@ -55,6 +60,9 @@ public class KafkaExporterTest {
     private final int healthDelay = 120;
     private final int healthTimeout = 30;
     private final Map<String, Object> metricsCm = singletonMap("animal", "wombat");
+    private final String metricsCmJson = "{\"animal\":\"wombat\"}";
+    private final String metricsCMName = "metrics-cm";
+    private final JmxPrometheusExporterMetrics jmxMetricsConfig = io.strimzi.operator.cluster.TestUtils.getJmxPrometheusExporterMetrics(AbstractModel.ANCILLARY_CM_KEY_METRICS, metricsCMName);
     private final Map<String, Object> kafkaConfig = singletonMap("foo", "bar");
     private final Map<String, Object> zooConfig = singletonMap("foo", "bar");
     private final Storage kafkaStorage = new EphemeralStorage();
@@ -130,7 +138,7 @@ public class KafkaExporterTest {
     @Test
     public void testFromConfigMapDefaultConfig() {
         Kafka resource = ResourceUtils.createKafka(namespace, cluster, replicas, null,
-                healthDelay, healthTimeout, metricsCm, kafkaConfig, zooConfig,
+                healthDelay, healthTimeout, metricsCm, jmxMetricsConfig, kafkaConfig, zooConfig,
                 kafkaStorage, zkStorage, kafkaLogJson, zooLogJson, new KafkaExporterSpec(), null);
         KafkaExporter ke = KafkaExporter.fromCrd(resource, VERSIONS);
         assertThat(ke.getImage(), is(KafkaVersionTestUtils.DEFAULT_KAFKA_IMAGE));
@@ -174,9 +182,13 @@ public class KafkaExporterTest {
 
         // Test volumes
         List<Volume> volumes = dep.getSpec().getTemplate().getSpec().getVolumes();
-        assertThat(volumes.size(), is(2));
+        assertThat(volumes.size(), is(3));
 
-        Volume volume = volumes.stream().filter(vol -> KafkaExporter.CLUSTER_CA_CERTS_VOLUME_NAME.equals(vol.getName())).findFirst().get();
+        Volume volume = volumes.stream().filter(vol -> AbstractModel.STRIMZI_TMP_DIRECTORY_DEFAULT_VOLUME_NAME.equals(vol.getName())).findFirst().get();
+        assertThat(volume, is(notNullValue()));
+        assertThat(volume.getEmptyDir().getMedium(), is("Memory"));
+
+        volume = volumes.stream().filter(vol -> KafkaExporter.CLUSTER_CA_CERTS_VOLUME_NAME.equals(vol.getName())).findFirst().get();
         assertThat(volume, is(notNullValue()));
         assertThat(volume.getSecret().getSecretName(), is(KafkaResources.clusterCaCertificateSecretName(cluster)));
 
@@ -186,9 +198,13 @@ public class KafkaExporterTest {
 
         // Test volume mounts
         List<VolumeMount> volumesMounts = dep.getSpec().getTemplate().getSpec().getContainers().get(0).getVolumeMounts();
-        assertThat(volumesMounts.size(), is(2));
+        assertThat(volumesMounts.size(), is(3));
 
-        VolumeMount volumeMount = volumesMounts.stream().filter(vol -> KafkaExporter.CLUSTER_CA_CERTS_VOLUME_NAME.equals(vol.getName())).findFirst().get();
+        VolumeMount volumeMount = volumesMounts.stream().filter(vol -> AbstractModel.STRIMZI_TMP_DIRECTORY_DEFAULT_VOLUME_NAME.equals(vol.getName())).findFirst().get();
+        assertThat(volumeMount, is(notNullValue()));
+        assertThat(volumeMount.getMountPath(), is(AbstractModel.STRIMZI_TMP_DIRECTORY_DEFAULT_MOUNT_PATH));
+
+        volumeMount = volumesMounts.stream().filter(vol -> KafkaExporter.CLUSTER_CA_CERTS_VOLUME_NAME.equals(vol.getName())).findFirst().get();
         assertThat(volumeMount, is(notNullValue()));
         assertThat(volumeMount.getMountPath(), is(KafkaExporter.CLUSTER_CA_CERTS_VOLUME_MOUNT));
 
@@ -239,7 +255,7 @@ public class KafkaExporterTest {
                 .build();
 
         Kafka resource = ResourceUtils.createKafka(namespace, cluster, replicas, image,
-                healthDelay, healthTimeout, metricsCm, kafkaConfig, zooConfig,
+                healthDelay, healthTimeout, metricsCm, jmxMetricsConfig, kafkaConfig, zooConfig,
                 kafkaStorage, zkStorage, kafkaLogJson, zooLogJson, exporterSpec, null);
         KafkaExporter ke = KafkaExporter.fromCrd(resource, VERSIONS);
 
@@ -275,7 +291,7 @@ public class KafkaExporterTest {
                 .build();
 
         Kafka resource = ResourceUtils.createKafka(namespace, cluster, replicas, image,
-                healthDelay, healthTimeout, metricsCm, kafkaConfig, zooConfig,
+                healthDelay, healthTimeout, metricsCm, jmxMetricsConfig, kafkaConfig, zooConfig,
                 kafkaStorage, zkStorage, kafkaLogJson, zooLogJson, exporterSpec, null);
         KafkaExporter ke = KafkaExporter.fromCrd(resource, VERSIONS);
 
@@ -287,7 +303,7 @@ public class KafkaExporterTest {
     @Test
     public void testExporterNotDeployed() {
         Kafka resource = ResourceUtils.createKafka(namespace, cluster, replicas, image,
-                healthDelay, healthTimeout, metricsCm, kafkaConfig, zooConfig,
+                healthDelay, healthTimeout, metricsCm, jmxMetricsConfig, kafkaConfig, zooConfig,
                 kafkaStorage, zkStorage, kafkaLogJson, zooLogJson, null, null);
         KafkaExporter ke = KafkaExporter.fromCrd(resource, VERSIONS);
 
@@ -298,7 +314,7 @@ public class KafkaExporterTest {
     @Test
     public void testGenerateDeploymentWhenDisabled()   {
         Kafka resource = ResourceUtils.createKafka(namespace, cluster, replicas, image,
-                healthDelay, healthTimeout, metricsCm, kafkaConfig, zooConfig,
+                healthDelay, healthTimeout, metricsCm, jmxMetricsConfig, kafkaConfig, zooConfig,
                 kafkaStorage, zkStorage, kafkaLogJson, zooLogJson, null, null);
         KafkaExporter ke = KafkaExporter.fromCrd(resource, VERSIONS);
 
@@ -341,6 +357,20 @@ public class KafkaExporterTest {
                 .withValue("value1")
                 .build());
 
+        TopologySpreadConstraint tsc1 = new TopologySpreadConstraintBuilder()
+                .withTopologyKey("kubernetes.io/zone")
+                .withMaxSkew(1)
+                .withWhenUnsatisfiable("DoNotSchedule")
+                .withLabelSelector(new LabelSelectorBuilder().withMatchLabels(singletonMap("label", "value")).build())
+                .build();
+
+        TopologySpreadConstraint tsc2 = new TopologySpreadConstraintBuilder()
+                .withTopologyKey("kubernetes.io/hostname")
+                .withMaxSkew(2)
+                .withWhenUnsatisfiable("ScheduleAnyway")
+                .withLabelSelector(new LabelSelectorBuilder().withMatchLabels(singletonMap("label", "value")).build())
+                .build();
+
         Kafka resource =
                 new KafkaBuilder(ResourceUtils.createKafka(namespace, cluster, replicas, image, healthDelay, healthTimeout))
                 .editSpec()
@@ -361,6 +391,7 @@ public class KafkaExporterTest {
                                 .withNewSchedulerName("my-scheduler")
                                 .withAffinity(affinity)
                                 .withTolerations(tolerations)
+                                .withTopologySpreadConstraints(tsc1, tsc2)
                             .endPod()
                             .withNewService()
                                 .withNewMetadata()
@@ -386,6 +417,7 @@ public class KafkaExporterTest {
         assertThat(dep.getSpec().getTemplate().getSpec().getSchedulerName(), is("my-scheduler"));
         assertThat(dep.getSpec().getTemplate().getSpec().getAffinity(), is(affinity));
         assertThat(dep.getSpec().getTemplate().getSpec().getTolerations(), is(tolerations));
+        assertThat(dep.getSpec().getTemplate().getSpec().getTopologySpreadConstraints(), containsInAnyOrder(tsc1, tsc2));
     }
 
     @AfterAll

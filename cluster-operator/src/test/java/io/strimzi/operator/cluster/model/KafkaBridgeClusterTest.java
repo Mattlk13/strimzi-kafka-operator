@@ -11,6 +11,7 @@ import io.fabric8.kubernetes.api.model.EnvVar;
 import io.fabric8.kubernetes.api.model.EnvVarBuilder;
 import io.fabric8.kubernetes.api.model.HasMetadata;
 import io.fabric8.kubernetes.api.model.IntOrString;
+import io.fabric8.kubernetes.api.model.LabelSelectorBuilder;
 import io.fabric8.kubernetes.api.model.LocalObjectReference;
 import io.fabric8.kubernetes.api.model.NodeSelectorTermBuilder;
 import io.fabric8.kubernetes.api.model.OwnerReference;
@@ -20,6 +21,8 @@ import io.fabric8.kubernetes.api.model.ResourceRequirementsBuilder;
 import io.fabric8.kubernetes.api.model.Service;
 import io.fabric8.kubernetes.api.model.Toleration;
 import io.fabric8.kubernetes.api.model.TolerationBuilder;
+import io.fabric8.kubernetes.api.model.TopologySpreadConstraint;
+import io.fabric8.kubernetes.api.model.TopologySpreadConstraintBuilder;
 import io.fabric8.kubernetes.api.model.apps.Deployment;
 import io.fabric8.kubernetes.api.model.policy.PodDisruptionBudget;
 import io.strimzi.api.kafka.model.CertSecretSource;
@@ -32,6 +35,7 @@ import io.strimzi.api.kafka.model.KafkaBridgeResources;
 import io.strimzi.api.kafka.model.authentication.KafkaClientAuthenticationOAuthBuilder;
 import io.strimzi.api.kafka.model.authentication.KafkaClientAuthenticationTlsBuilder;
 import io.strimzi.api.kafka.model.template.ContainerTemplate;
+import io.strimzi.api.kafka.model.template.DeploymentStrategy;
 import io.strimzi.api.kafka.model.tracing.JaegerTracing;
 import io.strimzi.kafka.oauth.client.ClientConfig;
 import io.strimzi.kafka.oauth.server.ServerConfig;
@@ -49,10 +53,12 @@ import java.util.Map;
 
 import static java.util.Collections.emptyMap;
 import static java.util.Collections.singletonList;
+import static java.util.Collections.singletonMap;
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.CoreMatchers.notNullValue;
 import static org.hamcrest.CoreMatchers.nullValue;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 public class KafkaBridgeClusterTest {
@@ -122,7 +128,7 @@ public class KafkaBridgeClusterTest {
     public void testDefaultValues() {
         KafkaBridgeCluster kbc = KafkaBridgeCluster.fromCrd(ResourceUtils.createEmptyKafkaBridge(namespace, cluster), VERSIONS);
 
-        assertThat(kbc.image, is("strimzi/kafka-bridge:latest"));
+        assertThat(kbc.image, is("quay.io/strimzi/kafka-bridge:latest"));
         assertThat(kbc.replicas, is(KafkaBridgeCluster.DEFAULT_REPLICAS));
         assertThat(kbc.readinessProbeOptions.getInitialDelaySeconds(), is(KafkaBridgeCluster.DEFAULT_HEALTHCHECK_DELAY));
         assertThat(kbc.readinessProbeOptions.getTimeoutSeconds(), is(KafkaBridgeCluster.DEFAULT_HEALTHCHECK_TIMEOUT));
@@ -206,13 +212,13 @@ public class KafkaBridgeClusterTest {
         KafkaBridgeCluster kbc = KafkaBridgeCluster.fromCrd(resource, VERSIONS);
         Deployment dep = kbc.generateDeployment(emptyMap(), true, null, null);
 
-        assertThat(dep.getSpec().getTemplate().getSpec().getVolumes().get(1).getName(), is("my-secret"));
-        assertThat(dep.getSpec().getTemplate().getSpec().getVolumes().get(2).getName(), is("my-another-secret"));
+        assertThat(dep.getSpec().getTemplate().getSpec().getVolumes().get(2).getName(), is("my-secret"));
+        assertThat(dep.getSpec().getTemplate().getSpec().getVolumes().get(3).getName(), is("my-another-secret"));
 
         List<Container> containers = dep.getSpec().getTemplate().getSpec().getContainers();
 
-        assertThat(containers.get(0).getVolumeMounts().get(1).getMountPath(), is(KafkaBridgeCluster.TLS_CERTS_BASE_VOLUME_MOUNT + "my-secret"));
-        assertThat(containers.get(0).getVolumeMounts().get(2).getMountPath(), is(KafkaBridgeCluster.TLS_CERTS_BASE_VOLUME_MOUNT + "my-another-secret"));
+        assertThat(containers.get(0).getVolumeMounts().get(2).getMountPath(), is(KafkaBridgeCluster.TLS_CERTS_BASE_VOLUME_MOUNT + "my-secret"));
+        assertThat(containers.get(0).getVolumeMounts().get(3).getMountPath(), is(KafkaBridgeCluster.TLS_CERTS_BASE_VOLUME_MOUNT + "my-another-secret"));
 
         assertThat(AbstractModel.containerEnvVars(containers.get(0)).get(KafkaBridgeCluster.ENV_VAR_KAFKA_BRIDGE_TRUSTED_CERTS), is("my-secret/cert.crt;my-secret/new-cert.crt;my-another-secret/another-cert.crt"));
         assertThat(AbstractModel.containerEnvVars(containers.get(0)).get(KafkaBridgeCluster.ENV_VAR_KAFKA_BRIDGE_TLS), is("true"));
@@ -238,11 +244,11 @@ public class KafkaBridgeClusterTest {
         KafkaBridgeCluster kbc = KafkaBridgeCluster.fromCrd(resource, VERSIONS);
         Deployment dep = kbc.generateDeployment(emptyMap(), true, null, null);
 
-        assertThat(dep.getSpec().getTemplate().getSpec().getVolumes().get(2).getName(), is("user-secret"));
+        assertThat(dep.getSpec().getTemplate().getSpec().getVolumes().get(3).getName(), is("user-secret"));
 
         List<Container> containers = dep.getSpec().getTemplate().getSpec().getContainers();
 
-        assertThat(containers.get(0).getVolumeMounts().get(2).getMountPath(), is(KafkaBridgeCluster.TLS_CERTS_BASE_VOLUME_MOUNT + "user-secret"));
+        assertThat(containers.get(0).getVolumeMounts().get(3).getMountPath(), is(KafkaBridgeCluster.TLS_CERTS_BASE_VOLUME_MOUNT + "user-secret"));
 
         assertThat(AbstractModel.containerEnvVars(containers.get(0)).get(KafkaBridgeCluster.ENV_VAR_KAFKA_BRIDGE_TLS_AUTH_CERT), is("user-secret/user.crt"));
         assertThat(AbstractModel.containerEnvVars(containers.get(0)).get(KafkaBridgeCluster.ENV_VAR_KAFKA_BRIDGE_TLS_AUTH_KEY), is("user-secret/user.key"));
@@ -270,8 +276,8 @@ public class KafkaBridgeClusterTest {
         Deployment dep = kbc.generateDeployment(emptyMap(), true, null, null);
 
         // 2 = 1 volume from logging/metrics + just 1 from above certs Secret
-        assertThat(dep.getSpec().getTemplate().getSpec().getVolumes().size(), is(2));
-        assertThat(dep.getSpec().getTemplate().getSpec().getVolumes().get(1).getName(), is("my-secret"));
+        assertThat(dep.getSpec().getTemplate().getSpec().getVolumes().size(), is(3));
+        assertThat(dep.getSpec().getTemplate().getSpec().getVolumes().get(2).getName(), is("my-secret"));
     }
 
     @Test
@@ -290,11 +296,11 @@ public class KafkaBridgeClusterTest {
         KafkaBridgeCluster kbc = KafkaBridgeCluster.fromCrd(resource, VERSIONS);
         Deployment dep = kbc.generateDeployment(emptyMap(), true, null, null);
 
-        assertThat(dep.getSpec().getTemplate().getSpec().getVolumes().get(1).getName(), is("user1-secret"));
+        assertThat(dep.getSpec().getTemplate().getSpec().getVolumes().get(2).getName(), is("user1-secret"));
 
         List<Container> containers = dep.getSpec().getTemplate().getSpec().getContainers();
 
-        assertThat(containers.get(0).getVolumeMounts().get(1).getMountPath(), is(KafkaBridgeCluster.PASSWORD_VOLUME_MOUNT + "user1-secret"));
+        assertThat(containers.get(0).getVolumeMounts().get(2).getMountPath(), is(KafkaBridgeCluster.PASSWORD_VOLUME_MOUNT + "user1-secret"));
 
         assertThat(AbstractModel.containerEnvVars(containers.get(0)).get(KafkaBridgeCluster.ENV_VAR_KAFKA_BRIDGE_SASL_PASSWORD_FILE), is("user1-secret/password"));
         assertThat(AbstractModel.containerEnvVars(containers.get(0)).get(KafkaBridgeCluster.ENV_VAR_KAFKA_BRIDGE_SASL_USERNAME), is("user1"));
@@ -317,11 +323,11 @@ public class KafkaBridgeClusterTest {
         KafkaBridgeCluster kbc = KafkaBridgeCluster.fromCrd(resource, VERSIONS);
         Deployment dep = kbc.generateDeployment(emptyMap(), true, null, null);
 
-        assertThat(dep.getSpec().getTemplate().getSpec().getVolumes().get(1).getName(), is("user1-secret"));
+        assertThat(dep.getSpec().getTemplate().getSpec().getVolumes().get(2).getName(), is("user1-secret"));
 
         List<Container> containers = dep.getSpec().getTemplate().getSpec().getContainers();
 
-        assertThat(containers.get(0).getVolumeMounts().get(1).getMountPath(), is(KafkaBridgeCluster.PASSWORD_VOLUME_MOUNT + "user1-secret"));
+        assertThat(containers.get(0).getVolumeMounts().get(2).getMountPath(), is(KafkaBridgeCluster.PASSWORD_VOLUME_MOUNT + "user1-secret"));
 
         assertThat(AbstractModel.containerEnvVars(containers.get(0)).get(KafkaBridgeCluster.ENV_VAR_KAFKA_BRIDGE_SASL_PASSWORD_FILE), is("user1-secret/password"));
         assertThat(AbstractModel.containerEnvVars(containers.get(0)).get(KafkaBridgeCluster.ENV_VAR_KAFKA_BRIDGE_SASL_USERNAME), is("user1"));
@@ -367,6 +373,20 @@ public class KafkaBridgeClusterTest {
                 .withValue("value1")
                 .build());
 
+        TopologySpreadConstraint tsc1 = new TopologySpreadConstraintBuilder()
+                .withTopologyKey("kubernetes.io/zone")
+                .withMaxSkew(1)
+                .withWhenUnsatisfiable("DoNotSchedule")
+                .withLabelSelector(new LabelSelectorBuilder().withMatchLabels(singletonMap("label", "value")).build())
+                .build();
+
+        TopologySpreadConstraint tsc2 = new TopologySpreadConstraintBuilder()
+                .withTopologyKey("kubernetes.io/hostname")
+                .withMaxSkew(2)
+                .withWhenUnsatisfiable("ScheduleAnyway")
+                .withLabelSelector(new LabelSelectorBuilder().withMatchLabels(singletonMap("label", "value")).build())
+                .build();
+
         KafkaBridge resource = new KafkaBridgeBuilder(this.resource)
                 .editSpec()
                     .withNewTemplate()
@@ -375,6 +395,7 @@ public class KafkaBridgeClusterTest {
                                 .withLabels(depLabels)
                                 .withAnnotations(depAnots)
                             .endMetadata()
+                            .withDeploymentStrategy(DeploymentStrategy.RECREATE)
                         .endDeployment()
                         .withNewPod()
                             .withNewMetadata()
@@ -385,6 +406,7 @@ public class KafkaBridgeClusterTest {
                             .withNewSchedulerName("my-scheduler")
                             .withAffinity(affinity)
                             .withTolerations(tolerations)
+                            .withTopologySpreadConstraints(tsc1, tsc2)
                         .endPod()
                         .withNewApiService()
                             .withNewMetadata()
@@ -408,6 +430,8 @@ public class KafkaBridgeClusterTest {
         assertThat(dep.getMetadata().getLabels().entrySet().containsAll(expectedDepLabels.entrySet()), is(true));
         assertThat(dep.getMetadata().getAnnotations().entrySet().containsAll(depAnots.entrySet()), is(true));
         assertThat(dep.getSpec().getTemplate().getSpec().getPriorityClassName(), is("top-priority"));
+        assertThat(dep.getSpec().getStrategy().getType(), is("Recreate"));
+        assertThat(dep.getSpec().getStrategy().getRollingUpdate(), is(nullValue()));
 
         // Check Pods
         assertThat(dep.getSpec().getTemplate().getMetadata().getLabels().entrySet().containsAll(podLabels.entrySet()), is(true));
@@ -415,6 +439,7 @@ public class KafkaBridgeClusterTest {
         assertThat(dep.getSpec().getTemplate().getSpec().getSchedulerName(), is("my-scheduler"));
         assertThat(dep.getSpec().getTemplate().getSpec().getAffinity(), is(affinity));
         assertThat(dep.getSpec().getTemplate().getSpec().getTolerations(), is(tolerations));
+        assertThat(dep.getSpec().getTemplate().getSpec().getTopologySpreadConstraints(), containsInAnyOrder(tsc1, tsc2));
 
         // Check Service
         Service svc = kbc.generateService();

@@ -56,7 +56,7 @@ You can also configure the `ssl.endpoint.identification.algorithm` property to e
 .Example Kafka Connect configuration
 [source,yaml,subs="attributes+"]
 ----
-apiVersion: {KafkaApiVersion}
+apiVersion: {KafkaConnectApiVersion}
 kind: KafkaConnect
 metadata:
   name: my-connect
@@ -105,7 +105,7 @@ Kafka Connect uses the Apache `log4j` logger implementation.
 Use the `logging` property to configure loggers and logger levels.
 
 You can set the log levels by specifying the logger and level directly (inline) or use a custom (external) ConfigMap.
-If a ConfigMap is used, you set `logging.name` property to the name of the ConfigMap containing the external logging configuration. Inside the ConfigMap, the logging configuration is described using `log4j.properties`.
+If a ConfigMap is used, you set `logging.valueFrom.configMapKeyRef.name` property to the name of the ConfigMap containing the external logging configuration. Inside the ConfigMap, the logging configuration is described using `log4j.properties`. Both `logging.valueFrom.configMapKeyRef.name` and `logging.valueFrom.configMapKeyRef.key` properties are mandatory. A ConfigMap using the exact logging configuration specified is created with the custom resource when the Cluster Operator is running, then recreated after each reconciliation. If you do not specify a custom ConfigMap, default logging settings are used. If a specific logger value is not set, upper-level logger settings are inherited for that logger.
 For more information about log levels, see {ApacheLoggers}.
 
 Here we see examples of `inline` and `external` logging.
@@ -113,7 +113,7 @@ Here we see examples of `inline` and `external` logging.
 .Inline logging
 [source,yaml,subs="+quotes,attributes"]
 ----
-apiVersion: {KafkaApiVersion}
+apiVersion: {KafkaConnectApiVersion}
 kind: KafkaConnect
 spec:
   # ...
@@ -127,19 +127,23 @@ spec:
 .External logging
 [source,yaml,subs="+quotes,attributes"]
 ----
-apiVersion: {KafkaApiVersion}
+apiVersion: {KafkaConnectApiVersion}
 kind: KafkaConnect
 spec:
   # ...
   logging:
     type: external
-    name: customConfigMap
+    valueFrom:
+      configMapKeyRef:
+        name: customConfigMap
+        key: connect-logging.log4j
   # ...
 ----
 
 Any available loggers that are not configured have their level set to `OFF`.
 
-Changes to Kafka Connect logging levels are applied dynamically.
+If Kafka Connect was deployed using the Cluster Operator,
+changes to Kafka Connect logging levels are applied dynamically.
 
 If you use external logging, a rolling update is triggered when logging appenders are changed.
 

@@ -63,13 +63,12 @@ public abstract class BaseCmdKubeClient<K extends BaseCmdKubeClient<K>> implemen
 
     private static final Context NOOP = new Context();
 
-    @Override
-    public abstract K clientWithAdmin();
-
     protected Context defaultContext() {
         return NOOP;
     }
 
+    // Admin contex tis not implemented now, because it's not needed
+    // In case it will be neded in future, we should change the kubeconfig and apply it for both oc and kubectl
     protected Context adminContext() {
         return defaultContext();
     }
@@ -97,6 +96,28 @@ public abstract class BaseCmdKubeClient<K extends BaseCmdKubeClient<K>> implemen
         return Exec.exec(namespacedCommand("get", "events")).out();
     }
 
+    @Override
+    @SuppressWarnings("unchecked")
+    public K create(File file) {
+        Exec.exec(null, namespacedCommand(CREATE, "-f", file.getAbsolutePath()), 0, false, true);
+
+        return (K) this;
+    }
+
+    @Override
+    @SuppressWarnings("unchecked")
+    public K createOrReplace(File file) {
+        try (Context context = defaultContext()) {
+            try {
+                create(file);
+            } catch (KubeClusterException.AlreadyExists e) {
+                Exec.exec(null, namespacedCommand(REPLACE, "-f", file.getAbsolutePath()), 0, false);
+            }
+
+            return (K) this;
+        }
+    }
+    
     @Override
     @SuppressWarnings("unchecked")
     public K create(File... files) {
@@ -181,7 +202,30 @@ public abstract class BaseCmdKubeClient<K extends BaseCmdKubeClient<K>> implemen
     @SuppressWarnings("unchecked")
     public K applyContent(String yamlContent) {
         try (Context context = defaultContext()) {
-            Exec.exec(yamlContent, namespacedCommand(APPLY, "-f", "-"));
+            Exec.exec(yamlContent, namespacedCommand(APPLY, "-f", "-"), 0, true);
+            return (K) this;
+        }
+    }
+
+    @Override
+    @SuppressWarnings("unchecked")
+    public K createContent(String yamlContent) {
+        try (Context context = defaultContext()) {
+            Exec.exec(yamlContent, namespacedCommand(CREATE, "-f", "-"), 0, true);
+            return (K) this;
+        }
+    }
+
+    @Override
+    @SuppressWarnings("unchecked")
+    public K replaceContent(String yamlContent) {
+        try (Context context = defaultContext()) {
+            try {
+                createContent(yamlContent);
+            } catch (KubeClusterException.AlreadyExists e) {
+                Exec.exec(yamlContent, namespacedCommand(REPLACE, "-f", "-"), 0, true);
+            }
+
             return (K) this;
         }
     }
@@ -199,7 +243,7 @@ public abstract class BaseCmdKubeClient<K extends BaseCmdKubeClient<K>> implemen
     @SuppressWarnings("unchecked")
     public K createNamespace(String name) {
         try (Context context = adminContext()) {
-            Exec.exec(namespacedCommand(CREATE, "namespace", name));
+            Exec.exec(null, namespacedCommand(CREATE, "namespace", name), 0, true);
         }
         return (K) this;
     }
@@ -370,12 +414,17 @@ public abstract class BaseCmdKubeClient<K extends BaseCmdKubeClient<K>> implemen
     }
 
     @Override
+    public String getResources(String resourceType) {
+        return Exec.exec(namespacedCommand("get", resourceType)).out();
+    }
+
+    @Override
     public String getResourcesAsYaml(String resourceType) {
         return Exec.exec(namespacedCommand("get", resourceType, "-o", "yaml")).out();
     }
 
     @Override
-    public void createResourceAndApply(String template, Map<String, String> params) {
+    synchronized public void createResourceAndApply(String template, Map<String, String> params) {
         List<String> cmd = namespacedCommand("process", template, "-l", "app=" + template, "-o", "yaml");
         for (Map.Entry<String, String> entry : params.entrySet()) {
             cmd.add("-p");
@@ -434,5 +483,20 @@ public abstract class BaseCmdKubeClient<K extends BaseCmdKubeClient<K>> implemen
 
     public List<String> listResourcesByLabel(String resourceType, String label) {
         return asList(Exec.exec(namespacedCommand("get", resourceType, "-l", label, "-o", "jsonpath={range .items[*]}{.metadata.name} ")).out().split("\\s+"));
+    }
+
+    @Override
+    public String getResourceJsonPath(String resourceType, String resourceName, String path) {
+        return Exec.exec(namespacedCommand("get", resourceType, "-o", "jsonpath={.items[?(.metadata.name==\"" + resourceName + "\")]" + path + "}")).out().trim();
+    }
+
+    @Override
+    public boolean getResourceReadiness(String resourceType, String resourceName) {
+        return Exec.exec(namespacedCommand("get", resourceType, "-o", "jsonpath={.items[?(.metadata.name==\"" + resourceName + "\")].status.conditions[?(.type==\"Ready\")].status}")).out().contains("True");
+    }
+
+    @Override
+    public void patchResource(String resourceType, String resourceName, String patchPath, String value) {
+        Exec.exec(namespacedCommand("patch", resourceType, resourceName, "--type=json", "-p=[{\"op\": \"replace\",\"path\":\"" + patchPath + "\",\"value\":\"" + value + "\"}]"));
     }
 }

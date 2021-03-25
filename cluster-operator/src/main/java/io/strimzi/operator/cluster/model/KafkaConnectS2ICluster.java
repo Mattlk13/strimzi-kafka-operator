@@ -54,9 +54,15 @@ public class KafkaConnectS2ICluster extends KafkaConnectCluster {
         super(resource, APPLICATION_NAME);
     }
 
+    // Deprecation is suppressed because of KafkaConnectS2I
+    @SuppressWarnings("deprecation")
     public static KafkaConnectS2ICluster fromCrd(KafkaConnectS2I kafkaConnectS2I, KafkaVersion.Lookup versions) {
         KafkaConnectS2ISpec spec = kafkaConnectS2I.getSpec();
         KafkaConnectS2ICluster cluster = fromSpec(spec, versions, new KafkaConnectS2ICluster(kafkaConnectS2I));
+
+        if (spec.getBuild() != null)  {
+            throw new InvalidResourceException(".spec.build can be used only with KafkaConnect and is not supported with KafkaConnectS2I.");
+        }
 
         cluster.setOwnerReference(kafkaConnectS2I);
         cluster.setInsecureSourceRepository(spec.isInsecureSourceRepository());
@@ -84,7 +90,7 @@ public class KafkaConnectS2ICluster extends KafkaConnectCluster {
                 .withPorts(getContainerPortList())
                 .withLivenessProbe(ProbeGenerator.httpProbe(livenessProbeOptions, livenessPath, REST_API_PORT_NAME))
                 .withReadinessProbe(ProbeGenerator.httpProbe(readinessProbeOptions, readinessPath, REST_API_PORT_NAME))
-                .withVolumeMounts(getVolumeMounts())
+                .withVolumeMounts(getVolumeMounts(true))
                 .withResources(getResources())
                 .withImagePullPolicy(determineImagePullPolicy(imagePullPolicy, image))
                 .withSecurityContext(templateContainerSecurityContext)
@@ -106,13 +112,21 @@ public class KafkaConnectS2ICluster extends KafkaConnectCluster {
                 .endImageChangeParams()
                 .build();
 
-        DeploymentStrategy updateStrategy = new DeploymentStrategyBuilder()
-                .withType("Rolling")
-                .withNewRollingParams()
+        DeploymentStrategy updateStrategy;
+
+        if (templateDeploymentStrategy == io.strimzi.api.kafka.model.template.DeploymentStrategy.ROLLING_UPDATE) {
+            updateStrategy = new DeploymentStrategyBuilder()
+                    .withType("Rolling")
+                    .withNewRollingParams()
                     .withMaxSurge(new IntOrString(1))
                     .withMaxUnavailable(new IntOrString(0))
-                .endRollingParams()
-                .build();
+                    .endRollingParams()
+                    .build();
+        } else {
+            updateStrategy = new DeploymentStrategyBuilder()
+                    .withType("Recreate")
+                    .build();
+        }
 
         DeploymentConfig dc = new DeploymentConfigBuilder()
                 .withNewMetadata()
@@ -132,7 +146,7 @@ public class KafkaConnectS2ICluster extends KafkaConnectCluster {
                         .endMetadata()
                         .withNewSpec()
                             .withContainers(container)
-                            .withVolumes(getVolumes(isOpenShift))
+                            .withVolumes(getVolumes(isOpenShift, true))
                             .withTolerations(getTolerations())
                             .withAffinity(getMergedAffinity())
                             .withTerminationGracePeriodSeconds(Long.valueOf(templateTerminationGracePeriodSeconds))
@@ -141,6 +155,7 @@ public class KafkaConnectS2ICluster extends KafkaConnectCluster {
                             .withPriorityClassName(templatePodPriorityClassName)
                             .withSchedulerName(templatePodSchedulerName)
                             .withHostAliases(templatePodHostAliases)
+                            .withTopologySpreadConstraints(templatePodTopologySpreadConstraints)
                         .endSpec()
                     .endTemplate()
                     .withTriggers(configChangeTrigger, imageChangeTrigger)

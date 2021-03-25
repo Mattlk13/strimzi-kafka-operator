@@ -6,14 +6,21 @@ package io.strimzi.operator.cluster.model;
 
 import io.fabric8.kubernetes.api.model.Container;
 import io.fabric8.kubernetes.api.model.EnvVar;
+import io.fabric8.kubernetes.api.model.LabelSelectorBuilder;
 import io.fabric8.kubernetes.api.model.LocalObjectReference;
 import io.fabric8.kubernetes.api.model.PodSecurityContextBuilder;
 import io.fabric8.kubernetes.api.model.SecurityContext;
 import io.fabric8.kubernetes.api.model.SecurityContextBuilder;
 import io.fabric8.kubernetes.api.model.Toleration;
 import io.fabric8.kubernetes.api.model.TolerationBuilder;
+import io.fabric8.kubernetes.api.model.TopologySpreadConstraint;
+import io.fabric8.kubernetes.api.model.TopologySpreadConstraintBuilder;
 import io.fabric8.kubernetes.api.model.VolumeMount;
 import io.fabric8.kubernetes.api.model.apps.Deployment;
+import io.fabric8.kubernetes.api.model.rbac.PolicyRule;
+import io.fabric8.kubernetes.api.model.rbac.PolicyRuleBuilder;
+import io.fabric8.kubernetes.api.model.rbac.Role;
+import io.strimzi.api.kafka.model.Constants;
 import io.strimzi.api.kafka.model.ContainerEnvVar;
 import io.strimzi.api.kafka.model.EntityOperatorSpec;
 import io.strimzi.api.kafka.model.EntityOperatorSpecBuilder;
@@ -45,6 +52,7 @@ import java.util.stream.Collectors;
 
 import static io.strimzi.test.TestUtils.map;
 import static java.util.Collections.singletonList;
+import static java.util.Collections.singletonMap;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.CoreMatchers.hasItem;
 import static org.hamcrest.CoreMatchers.is;
@@ -52,6 +60,7 @@ import static org.hamcrest.CoreMatchers.notNullValue;
 import static org.hamcrest.CoreMatchers.nullValue;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.allOf;
+import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.hasProperty;
 
 public class EntityOperatorTest {
@@ -118,6 +127,7 @@ public class EntityOperatorTest {
         assertThat(AbstractModel.containerEnvVars(tlsSidecarContainer).get(EntityOperator.ENV_VAR_ZOOKEEPER_CONNECT), is(EntityOperator.defaultZookeeperConnect(cluster)));
         assertThat(AbstractModel.containerEnvVars(tlsSidecarContainer).get(ModelUtils.TLS_SIDECAR_LOG_LEVEL), is(TlsSidecarLogLevel.NOTICE.toValue()));
         assertThat(EntityOperatorTest.volumeMounts(tlsSidecarContainer.getVolumeMounts()), is(map(
+                        EntityOperator.TLS_SIDECAR_TMP_DIRECTORY_DEFAULT_VOLUME_NAME, AbstractModel.STRIMZI_TMP_DIRECTORY_DEFAULT_MOUNT_PATH,
                         EntityOperator.TLS_SIDECAR_CA_CERTS_VOLUME_NAME, EntityOperator.TLS_SIDECAR_CA_CERTS_VOLUME_MOUNT,
                         EntityOperator.TLS_SIDECAR_EO_CERTS_VOLUME_NAME, EntityOperator.TLS_SIDECAR_EO_CERTS_VOLUME_MOUNT)));
         assertThat(tlsSidecarContainer.getReadinessProbe().getInitialDelaySeconds(), is(Integer.valueOf(tlsHealthDelay)));
@@ -149,13 +159,6 @@ public class EntityOperatorTest {
     }
 
     @Test
-    public void withOldAffinityAndTolerations() throws IOException {
-        ResourceTester<Kafka, EntityOperator> helper = new ResourceTester<>(Kafka.class, VERSIONS, EntityOperator::fromCrd, this.getClass().getSimpleName() + ".withOldAffinityAndTolerations");
-        helper.assertDesiredResource("-DeploymentAffinity.yaml", zc -> zc.generateDeployment(true, Collections.EMPTY_MAP, null, null).getSpec().getTemplate().getSpec().getAffinity());
-        helper.assertDesiredResource("-DeploymentTolerations.yaml", zc -> zc.generateDeployment(true, Collections.EMPTY_MAP, null, null).getSpec().getTemplate().getSpec().getTolerations());
-    }
-
-    @Test
     public void withAffinityAndTolerations() throws IOException {
         ResourceTester<Kafka, EntityOperator> helper = new ResourceTester<>(Kafka.class, VERSIONS, EntityOperator::fromCrd, this.getClass().getSimpleName() + ".withAffinityAndTolerations");
         helper.assertDesiredResource("-DeploymentAffinity.yaml", zc -> zc.generateDeployment(true, Collections.EMPTY_MAP, null, null).getSpec().getTemplate().getSpec().getAffinity());
@@ -184,6 +187,19 @@ public class EntityOperatorTest {
                 .withValue(null)
                 .build();
 
+        TopologySpreadConstraint tsc1 = new TopologySpreadConstraintBuilder()
+                .withTopologyKey("kubernetes.io/zone")
+                .withMaxSkew(1)
+                .withWhenUnsatisfiable("DoNotSchedule")
+                .withLabelSelector(new LabelSelectorBuilder().withMatchLabels(singletonMap("label", "value")).build())
+                .build();
+
+        TopologySpreadConstraint tsc2 = new TopologySpreadConstraintBuilder()
+                .withTopologyKey("kubernetes.io/hostname")
+                .withMaxSkew(2)
+                .withWhenUnsatisfiable("ScheduleAnyway")
+                .withLabelSelector(new LabelSelectorBuilder().withMatchLabels(singletonMap("label", "value")).build())
+                .build();
 
         Kafka resource =
                 new KafkaBuilder(ResourceUtils.createKafka(namespace, cluster, replicas, image, healthDelay, healthTimeout))
@@ -206,6 +222,7 @@ public class EntityOperatorTest {
                                         .withNewPriorityClassName("top-priority")
                                         .withNewSchedulerName("my-scheduler")
                                         .withTolerations(singletonList(toleration))
+                                        .withTopologySpreadConstraints(tsc1, tsc2)
                                     .endPod()
                                 .endTemplate()
                             .endEntityOperator()
@@ -223,6 +240,7 @@ public class EntityOperatorTest {
         assertThat(dep.getSpec().getTemplate().getMetadata().getLabels().entrySet().containsAll(podLabels.entrySet()), is(true));
         assertThat(dep.getSpec().getTemplate().getMetadata().getAnnotations().entrySet().containsAll(podAnots.entrySet()), is(true));
         assertThat(dep.getSpec().getTemplate().getSpec().getSchedulerName(), is("my-scheduler"));
+        assertThat(dep.getSpec().getTemplate().getSpec().getTopologySpreadConstraints(), containsInAnyOrder(tsc1, tsc2));
 
         assertThat(dep.getSpec().getTemplate().getSpec().getTolerations(), is(singletonList(assertToleration)));
     }
@@ -866,5 +884,57 @@ public class EntityOperatorTest {
                         hasProperty("name", equalTo(EntityOperator.TLS_SIDECAR_NAME)),
                         hasProperty("securityContext", equalTo(securityContext))
                 )));
+    }
+
+    @Test
+    public void testRole() {
+        Kafka resource = new KafkaBuilder(ResourceUtils.createKafka(namespace, cluster, replicas, image, healthDelay, healthTimeout))
+                .editSpec()
+                    .editOrNewEntityOperator()
+                    .endEntityOperator()
+                .endSpec()
+                .build();
+
+        EntityOperator eo =  EntityOperator.fromCrd(resource, VERSIONS);
+        Role role = eo.generateRole(namespace, namespace);
+
+        assertThat(role.getMetadata().getName(), is("foo-entity-operator"));
+        assertThat(role.getMetadata().getNamespace(), is(namespace));
+
+        List<PolicyRule> rules = new ArrayList<>();
+        rules.add(new PolicyRuleBuilder()
+                .addToResources("kafkatopics", "kafkatopics/status", "kafkausers", "kafkausers/status")
+                .addToVerbs("get", "list", "watch", "create", "patch", "update", "delete")
+                .addToApiGroups(Constants.RESOURCE_GROUP_NAME)
+                .build());
+        rules.add(new PolicyRuleBuilder()
+                .addToResources("events")
+                .addToVerbs("create")
+                .addToApiGroups("")
+                .build());
+        rules.add(new PolicyRuleBuilder()
+                .addToResources("secrets")
+                .addToVerbs("get", "list", "watch", "create", "delete", "patch", "update")
+                .addToApiGroups("")
+                .build());
+        assertThat(role.getRules(), is(rules));
+    }
+
+    @Test
+    public void testRoleInDifferentNamespace() {
+        Kafka resource = new KafkaBuilder(ResourceUtils.createKafka(namespace, cluster, replicas, image, healthDelay, healthTimeout))
+                .editSpec()
+                .editOrNewEntityOperator()
+                .endEntityOperator()
+                .endSpec()
+                .build();
+
+        EntityOperator eo =  EntityOperator.fromCrd(resource, VERSIONS);
+        Role role = eo.generateRole(namespace, namespace);
+
+        assertThat(role.getMetadata().getOwnerReferences().get(0), is(entityOperator.createOwnerReference()));
+
+        role = eo.generateRole(namespace, "some-other-namespace");
+        assertThat(role.getMetadata().getOwnerReferences().size(), is(0));
     }
 }

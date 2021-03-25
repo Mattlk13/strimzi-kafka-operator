@@ -123,7 +123,7 @@ public class JmxTrans extends AbstractModel {
 
             String image = spec.getImage();
             if (image == null) {
-                image = System.getenv().getOrDefault(STRIMZI_DEFAULT_JMXTRANS_IMAGE, "strimzi/jmxtrans:latest");
+                image = System.getenv().getOrDefault(STRIMZI_DEFAULT_JMXTRANS_IMAGE, "quay.io/strimzi/jmxtrans:latest");
             }
             result.setImage(image);
 
@@ -219,15 +219,19 @@ public class JmxTrans extends AbstractModel {
     }
 
     public List<Volume> getVolumes() {
-        List<Volume> volumes = new ArrayList<>(2);
+        List<Volume> volumes = new ArrayList<>(3);
+
+        volumes.add(createTempDirVolume());
         volumes.add(VolumeUtils.createConfigMapVolume(JMXTRANS_VOLUME_NAME, configMapName));
         volumes.add(VolumeUtils.createConfigMapVolume(logAndMetricsConfigVolumeName, KafkaCluster.metricAndLogConfigsName(clusterName)));
+
         return volumes;
     }
 
     private List<VolumeMount> getVolumeMounts() {
-        List<VolumeMount> volumeMountList = new ArrayList<>(2);
+        List<VolumeMount> volumeMountList = new ArrayList<>(3);
 
+        volumeMountList.add(createTempDirVolumeMount());
         volumeMountList.add(VolumeUtils.createVolumeMount(logAndMetricsConfigVolumeName, logAndMetricsConfigMountPath));
         volumeMountList.add(VolumeUtils.createVolumeMount(JMXTRANS_VOLUME_NAME, JMX_FILE_PATH));
         return volumeMountList;

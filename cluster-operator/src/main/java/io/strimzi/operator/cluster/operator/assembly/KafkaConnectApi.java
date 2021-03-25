@@ -12,6 +12,7 @@ import io.vertx.core.http.HttpClientResponse;
 import io.vertx.core.json.JsonObject;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * A Java client for the Kafka Connect REST API.
@@ -38,7 +39,7 @@ public interface KafkaConnectApi {
      */
     Future<Map<String, String>> getConnectorConfig(String host, int port, String connectorName);
 
-    public Future<Map<String, String>> getConnectorConfig(BackOff backOff, String host, int port, String connectorName);
+    Future<Map<String, String>> getConnectorConfig(BackOff backOff, String host, int port, String connectorName);
 
     /**
      * Make a {@code GET} request to {@code /connectors/${connectorName}}.
@@ -68,6 +69,17 @@ public interface KafkaConnectApi {
      * this returns the connector's status.
      */
     Future<Map<String, Object>> status(String host, int port, String connectorName);
+
+    /**
+     * Make a {@code GET} request to {@code /connectors/${connectorName}/status}.
+     * @param host The host to make the request to.
+     * @param port The port to make the request to.
+     * @param connectorName The name of the connector to get the status of.
+     * @param okStatusCodes List of HTTP codes considered as success
+     * @return A Future which completes with the result of the request. If the request was successful,
+     * this returns the connector's status.
+     */
+    Future<Map<String, Object>> status(String host, int port, String connectorName, Set<Integer> okStatusCodes);
 
     /**
      * Make a {@code GET} request to {@code /connectors/${connectorName}/status}, retrying according to {@code backoff}.
@@ -135,6 +147,35 @@ public interface KafkaConnectApi {
      * this returns the list of connect loggers.
      */
     Future<Map<String, Map<String, String>>> listConnectLoggers(String host, int port);
+
+    /**
+     * Make a {@code POST} request to {@code /connectors/${connectorName}/restart}.
+     * @param host The host to make the request to.
+     * @param port The port to make the request to.
+     * @param connectorName The name of the connector to restart.
+     * @return A Future which completes with the result of the request.
+     */
+    Future<Void> restart(String host, int port, String connectorName);
+
+    /**
+     * Make a {@code POST} request to {@code /connectors/${connectorName}/tasks/${taskID}/restart}.
+     * @param host The host to make the request to.
+     * @param port The port to make the request to.
+     * @param connectorName The name of the connector.
+     * @param taskID The ID of the connector task to restart.
+     * @return A Future which completes with the result of the request.
+     */
+    Future<Void> restartTask(String host, int port, String connectorName, int taskID);
+
+    /**
+     * Make a {@code GET} request to {@code /connectors/${connectorName}/topics}.
+     * @param host The host to make the request to.
+     * @param port The port to make the request to.
+     * @param connectorName The name of the connector to get the status of.
+     * @return A Future which completes with the result of the request. If the request was successful,
+     * this returns the connector's topics.
+     */
+    Future<List<String>> getConnectorTopics(String host, int port, String connectorName);
 }
 
 class ConnectRestException extends RuntimeException {

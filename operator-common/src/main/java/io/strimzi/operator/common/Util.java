@@ -4,11 +4,20 @@
  */
 package io.strimzi.operator.common;
 
+import io.fabric8.kubernetes.api.model.ConfigMap;
+import io.fabric8.kubernetes.api.model.HasMetadata;
+import io.fabric8.kubernetes.api.model.LabelSelector;
 import io.fabric8.kubernetes.api.model.Secret;
+import io.strimzi.api.kafka.model.ExternalLogging;
+import io.strimzi.api.kafka.model.JmxPrometheusExporterMetrics;
+import io.strimzi.api.kafka.model.Logging;
+import io.strimzi.api.kafka.model.MetricsConfig;
 import io.strimzi.operator.cluster.model.InvalidResourceException;
 import io.strimzi.operator.common.model.Labels;
 import io.strimzi.operator.common.model.OrderedProperties;
+import io.strimzi.operator.common.operator.resource.ConfigMapOperator;
 import io.strimzi.operator.common.operator.resource.TimeoutException;
+import io.vertx.core.CompositeFuture;
 import io.vertx.core.Future;
 import io.vertx.core.Handler;
 import io.vertx.core.Promise;
@@ -23,6 +32,7 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
 import java.security.KeyStoreException;
@@ -30,11 +40,13 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.StringTokenizer;
 import java.util.TreeMap;
 import java.util.function.BooleanSupplier;
@@ -457,4 +469,79 @@ public class Util {
         return sb.toString();
     }
 
+    /**
+     * Gets the first 8 characters from a SHA-1 hash of the provided String
+     *
+     * @param   toBeHashed   String for which the hash will be returned
+     * @return              First 8 characters of the SHA-1 hash
+     */
+    public static String sha1Prefix(String toBeHashed)   {
+        try {
+            // This is used to generate unique identifier which is not used for security => using SHA-1 is ok
+            MessageDigest sha1 = MessageDigest.getInstance("SHA-1");
+            byte[] digest = sha1.digest(toBeHashed.getBytes(StandardCharsets.US_ASCII));
+
+            return String.format("%040x", new BigInteger(1, digest)).substring(0, 8);
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException("Failed to get artifact URL SHA-1 hash", e);
+        }
+    }
+
+    @SuppressWarnings("deprecation")
+    public static Future<ConfigMap> getExternalLoggingCm(ConfigMapOperator configMapOperations, String namespace, ExternalLogging logging) {
+        Future<ConfigMap> loggingCmFut;
+        if (logging.getName() != null) {
+            loggingCmFut = configMapOperations.getAsync(namespace, logging.getName());
+        } else if (logging.getValueFrom() != null
+                && logging.getValueFrom().getConfigMapKeyRef() != null
+                && logging.getValueFrom().getConfigMapKeyRef().getName() != null) {
+            loggingCmFut = configMapOperations.getAsync(namespace, logging.getValueFrom().getConfigMapKeyRef().getName());
+        } else {
+            loggingCmFut = Future.succeededFuture(null);
+        }
+        return loggingCmFut;
+    }
+
+    public static Future<MetricsAndLogging> metricsAndLogging(ConfigMapOperator configMapOperations,
+                                                              String namespace,
+                                                              Logging logging, MetricsConfig metricsConfigInCm) {
+        List<Future> configMaps = new ArrayList<>(2);
+        if (metricsConfigInCm instanceof JmxPrometheusExporterMetrics) {
+            configMaps.add(configMapOperations.getAsync(namespace, ((JmxPrometheusExporterMetrics) metricsConfigInCm).getValueFrom().getConfigMapKeyRef().getName()));
+        } else if (metricsConfigInCm == null) {
+            configMaps.add(Future.succeededFuture(null));
+        } else {
+            LOGGER.warn("Unknown metrics type {}", metricsConfigInCm.getType());
+            throw new InvalidResourceException("Unknown metrics type " + metricsConfigInCm.getType());
+        }
+
+        if (logging instanceof ExternalLogging) {
+            configMaps.add(Util.getExternalLoggingCm(configMapOperations, namespace, (ExternalLogging) logging));
+        } else {
+            configMaps.add(Future.succeededFuture(null));
+        }
+        return CompositeFuture.join(configMaps).map(result -> new MetricsAndLogging(result.resultAt(0), result.resultAt(1)));
+    }
+
+    /**
+     * Checks if the Kubernetes resource matches LabelSelector. This is useful when you use get/getAsync to retrieve an
+     * resource and want to check if it matches the labels from the selector (since get/getAsync is using name and not
+     * labels to identify the resource).
+     *
+     * @param labelSelector The LabelSelector with the labels which should be present in the resource
+     * @param cr            The Custom Resource which labels should be checked
+     *
+     * @return              True if the resource contains all labels from the LabelSelector or if the LabelSelector is empty
+     */
+    public static boolean matchesSelector(Optional<LabelSelector> labelSelector, HasMetadata cr) {
+        if (labelSelector.isPresent()) {
+            if (cr.getMetadata().getLabels() != null) {
+                return cr.getMetadata().getLabels().entrySet().containsAll(labelSelector.get().getMatchLabels().entrySet());
+            } else {
+                return labelSelector.get().getMatchLabels().isEmpty();
+            }
+        }
+
+        return true;
+    }
 }

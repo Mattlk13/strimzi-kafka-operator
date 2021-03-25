@@ -5,7 +5,7 @@
     <parent>
         <artifactId>strimzi</artifactId>
         <groupId>io.strimzi</groupId>
-        <version>0.21.0-SNAPSHOT</version>
+        <version>0.23.0-SNAPSHOT</version>
     </parent>
     <modelVersion>4.0.0</modelVersion>
 
@@ -35,10 +35,6 @@
         </dependency>
         <dependency>
             <groupId>io.fabric8</groupId>
-            <artifactId>kubernetes-model-extensions</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>io.fabric8</groupId>
             <artifactId>kubernetes-model-apps</artifactId>
         </dependency>
         <dependency>
@@ -52,19 +48,6 @@
         <dependency>
             <groupId>io.fabric8</groupId>
             <artifactId>openshift-model</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>com.fasterxml.jackson.core</groupId>
-            <artifactId>jackson-databind</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>com.squareup.okio</groupId>
-            <artifactId>okio</artifactId>
-            <version>${okio.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>com.squareup.okhttp3</groupId>
-            <artifactId>okhttp</artifactId>
         </dependency>
         <dependency>
             <groupId>io.fabric8</groupId>
@@ -105,17 +88,20 @@
         </dependency>
         <dependency>
             <groupId>io.strimzi</groupId>
-            <artifactId>api</artifactId>
-            <scope>test</scope>
+            <artifactId>test</artifactId>
         </dependency>
         <dependency>
             <groupId>io.strimzi</groupId>
-            <artifactId>test</artifactId>
+            <artifactId>api</artifactId>
         </dependency>
         <dependency>
             <groupId>com.github.spotbugs</groupId>
             <artifactId>spotbugs-annotations</artifactId>
             <scope>compile</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
         </dependency>
     </dependencies>
 

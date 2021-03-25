@@ -1,4 +1,99 @@
+
 # CHANGELOG
+
+## 0.23.0
+
+* Make it possible to configure maximum number of connections and maximum connection creation rate in listener configuration
+* Add support for configuring finalizers for `loadbalancer` type listeners
+* Remove support for Kafka 2.5.x
+* Use dedicated Service Account for Kafka Connect Build on Kubernetes 
+* Remove direct ZooKeeper access for handling user quotas in the User Operator. Add usage of Admin Client API instead.
+* Migrate to CRD v1 (required by Kubernetes 1.22+)
+* Support for configuring custom Authorizer implementation 
+
+### Changes, deprecations and removals
+
+* Strimzi API versions `v1alpha1` and `v1beta1` were removed from all Strimzi custom resources apart from `KafkaTopic` and `KafkaUser` (use `v1beta2` versions instead)
+* The following annotations have been removed and cannot be used anymore:
+  * `cluster.operator.strimzi.io/delete-claim` (used internally only - replaced by `strimzi.io/delete-claim`)
+  * `operator.strimzi.io/generation` (used internally only - replaced by `strimzi.io/generation`)
+  * `operator.strimzi.io/delete-pod-and-pvc` (use `strimzi.io/delete-pod-and-pvc` instead)
+  * `operator.strimzi.io/manual-rolling-update` (use `strimzi.io/manual-rolling-update` instead)
+
+## 0.22.0
+
+* Add `v1beta2` version for all resources. `v1beta2` removes all deprecated fields.
+* Add annotations that enable the operator to restart Kafka Connect connectors or tasks. The annotations can be applied to the KafkaConnector and the KafkaMirrorMaker2 custom resources.
+* Add additional configuration options for the Kaniko executor used by the Kafka Connect Build on Kubernetes
+* Add support for JMX options configuration of all Kafka Connect (KC, KC2SI, MM2)
+* Update Strimzi Kafka OAuth to version 0.7 and add support for new features:
+  * OAuth authentication over SASL PLAIN mechanism
+  * Checking token audience
+  * Validating tokens using JSONPath filter queries to perform custom checks
+* Fix Cruise Control crash loop when updating container configurations
+* Configure external logging `ConfigMap` name and key.
+* Add support for configuring labels and annotations in ClusterRoleBindings created as part of Kafka and Kafka Connect clusters
+* Add support for Ingress v1 in Kubernetes 1.19 and newer
+* Add support for Kafka 2.6.1
+* List topics used by a Kafka Connect connector in the `.status` section of the `KafkaConnector` custom resource
+* Bump Cruise Control to v2.5.37 for Kafka 2.7 support. Note this new version of Cruise Control uses `Log4j 2` and is supported by dynamic logging configuration (where logging properties are defined in a ConfigMap). However, existing `Log4j` configurations must be updated to `Log4j 2` configurations.
+* Support pausing reconciliation of CR with annotation `strimzi.io/pause-reconciliation`
+
+### Changes, deprecations and removals
+
+* In the past, when no Ingress class was specified in the Ingress-type listener in the Kafka custom resource, the 
+  `kubernetes.io/ingress.class` annotation was automatically set to `nginx`. Because of the support for the new 
+  IngressClass resource and the new `ingressClassName` field in the Ingress resource, the default value will not be set 
+  anymore. Please use the `class` field in `.spec.kafka.listeners[].configuration` to specify the class name. 
+* The `KafkaConnectS2I` custom resource is deprecated and will be removed in the future. You can use the new [`KafkaConnect` build feature](https://strimzi.io/docs/operators/latest/full/deploying.html#creating-new-image-using-kafka-connect-build-str) instead.
+* Removed support for Helm2 charts as that version is now unsupported. There is no longer the need for separate `helm2` and `helm3` binaries, only `helm` (version 3) is required.
+* The following annotations are deprecated for a long time and will be removed in 0.23.0:
+  * `cluster.operator.strimzi.io/delete-claim` (used internally only - replaced by `strimzi.io/delete-claim`)
+  * `operator.strimzi.io/generation` (used internally only - replaced by `strimzi.io/generation`)
+  * `operator.strimzi.io/delete-pod-and-pvc` (use `strimzi.io/delete-pod-and-pvc` instead)
+  * `operator.strimzi.io/manual-rolling-update` (use `strimzi.io/manual-rolling-update` instead)
+* External logging configuration has changed. `spec.logging.name` is deprecated. Moved to `spec.logging.valueFrom.configMapKeyRef.name`. Key in the `ConfigMap` is configurable via `spec.logging.valueFrom.configMapKeyRef.key`.
+  * from
+  ```
+  logging:
+    type: external
+    name: my-config-map
+  ```
+  * to
+  ```
+  logging:
+    type: external
+    valueFrom:
+      configMapKeyRef:
+        name: my-config-map
+        key: my-key
+  ``` 
+* Existing Cruise Control logging configurations must be updated from `Log4j` syntax to `Log4j 2` syntax.
+  * For existing inline configurations, replace the `cruisecontrol.root.logger` property with `rootLogger.level`.
+  * For existing external configurations, replace the existing configuration with a new configuration file named `log4j2.properties` using `log4j 2` syntax.
+
+## 0.21.0
+
+* Add support for declarative management of connector plugins in Kafka Connect CR 
+* Add `inter.broker.protocol.version` to the default configuration in example YAMLs
+* Add support for `secretPrefix` property for User Operator to prefix all secret names created from KafkaUser resource.
+* Allow configuring labels and annotations for Cluster CA certificate secrets
+* Add the JAAS configuration string in the sasl.jaas.config property to the generated secrets for KafkaUser with SCRAM-SHA-512 authentication.
+* Strimzi `test-container` has been renamed to `strimzi-test-container` to make the name more clear
+* Updated the CPU usage metric in the Kafka, ZooKeeper and Cruise Control dashboards to include the CPU kernel time (other than the current user time)
+* Allow disabling ownerReference on CA secrets
+* Make it possible to run Strimzi operators and operands with read-only root filesystem
+* Move from Docker Hub to Quay.io as our container registry
+* Add possibility to configure DeploymentStrategy for Kafka Connect, Kafka Mirror Maker (1 and 2), and Kafka Bridge
+* Support passing metrics configuration as an external ConfigMap
+* Enable CORS configuration for Cruise Control
+* Add support for rolling individual Kafka or ZooKeeper pods through the Cluster Operator using an annotation
+* Add support for Topology Spread Constraints in Pod templates
+* Make Kafka `cluster-id` (KIP-78) available on Kafka CRD status
+* Add support for Kafka 2.7.0
+
+### Deprecations and removals
+* The `metrics` field in the Strimzi custom resources has been deprecated and will be removed in the future. For configuring metrics, use the new `metricsConfig` field and pass the configuration via ConfigMap.
 
 ## 0.20.0
 
@@ -6,7 +101,7 @@
 
 * Add support for Kafka 2.5.1 and 2.6.0. Remove support for 2.4.0 and 2.4.1
 * Remove TLS sidecars from Kafka pods => Kafka now uses native TLS to connect to ZooKeeper
-* Updated to Cruise Control 2.5.11, which adds Kafka 2.6.0 support and fixes a previous issue with CPU utilization statistics for containers. As a result, the CPUCapacityGoal has now been enabled.
+* Updated to Cruise Control 2.5.11, which adds Kafka 2.6.0 support and fixes a previous issue with CPU utilization statistics for containers. As a result, the CpuCapacityGoal has now been enabled.
 * Cruise Control metrics integration:
   * Enable metrics JMX exporter configuration in the `cruiseControl` property of the Kafka custom resource
   * New Grafana dashboard for the Cruise Control metrics

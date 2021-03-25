@@ -37,15 +37,15 @@ import java.util.Map;
 )
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @JsonPropertyOrder({
-        "replicas", "image", "storage",
-        "listeners", "authorization", "config",
+        "version", "replicas", "image", "listeners",
+        "config", "storage", "authorization",
         "rack", "brokerRackInitImage",
         "affinity", "tolerations",
         "livenessProbe", "readinessProbe",
         "jvmOptions", "jmxOptions", "resources",
-        "metrics", "logging", "tlsSidecar", "template"})
+        "metrics", "metricsConfig", "logging", "tlsSidecar", "template"})
 @EqualsAndHashCode
-public class KafkaClusterSpec implements UnknownPropertyPreserving, Serializable {
+public class KafkaClusterSpec implements HasConfigurableMetrics, UnknownPropertyPreserving, Serializable {
 
     private static final long serialVersionUID = 1L;
 
@@ -56,7 +56,8 @@ public class KafkaClusterSpec implements UnknownPropertyPreserving, Serializable
 
     public static final String FORBIDDEN_PREFIX_EXCEPTIONS = "zookeeper.connection.timeout.ms, ssl.cipher.suites, ssl.protocol, ssl.enabled.protocols,"
             + "cruise.control.metrics.topic.num.partitions, cruise.control.metrics.topic.replication.factor, cruise.control.metrics.topic.retention.ms,"
-            + "cruise.control.metrics.topic.auto.create.retries, cruise.control.metrics.topic.auto.create.timeout.ms";
+            + "cruise.control.metrics.topic.auto.create.retries, cruise.control.metrics.topic.auto.create.timeout.ms,"
+            + "cruise.control.metrics.topic.min.insync.replicas";
 
     protected Storage storage;
 
@@ -78,6 +79,7 @@ public class KafkaClusterSpec implements UnknownPropertyPreserving, Serializable
     private Probe readinessProbe;
     private JvmOptions jvmOptions;
     private KafkaJmxOptions jmxOptions;
+    private MetricsConfig metricsConfig;
     private Map<String, Object> metrics;
     private Affinity affinity;
     private List<Toleration> tolerations;
@@ -148,7 +150,7 @@ public class KafkaClusterSpec implements UnknownPropertyPreserving, Serializable
     }
 
     @PresentInVersions("v1alpha1-v1beta1")
-    @DeprecatedProperty
+    @DeprecatedProperty(removalVersion = "v1beta2")
     @Deprecated
     @Description("TLS sidecar configuration")
     @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -233,22 +235,39 @@ public class KafkaClusterSpec implements UnknownPropertyPreserving, Serializable
         this.jmxOptions = jmxOptions;
     }
 
+    @DeprecatedProperty(movedToPath = "spec.kafka.metricsConfig", removalVersion = "v1beta2")
+    @PresentInVersions("v1alpha1-v1beta1")
+    @Deprecated
     @JsonInclude(JsonInclude.Include.NON_EMPTY)
     @Description("The Prometheus JMX Exporter configuration. " +
             "See https://github.com/prometheus/jmx_exporter for details of the structure of this configuration.")
+    @Override
     public Map<String, Object> getMetrics() {
         return metrics;
     }
 
+    @Override
     public void setMetrics(Map<String, Object> metrics) {
         this.metrics = metrics;
+    }
+
+    @Description("Metrics configuration.")
+    @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    @Override
+    public MetricsConfig getMetricsConfig() {
+        return metricsConfig;
+    }
+
+    @Override
+    public void setMetricsConfig(MetricsConfig metricsConfig) {
+        this.metricsConfig = metricsConfig;
     }
 
     @PresentInVersions("v1alpha1-v1beta1")
     @Description("The pod's affinity rules.")
     @KubeLink(group = "core", version = "v1", kind = "affinity")
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    @DeprecatedProperty(movedToPath = "spec.kafka.template.pod.affinity")
+    @DeprecatedProperty(movedToPath = "spec.kafka.template.pod.affinity", removalVersion = "v1beta2")
     @Deprecated
     public Affinity getAffinity() {
         return affinity;
@@ -263,7 +282,7 @@ public class KafkaClusterSpec implements UnknownPropertyPreserving, Serializable
     @Description("The pod's tolerations.")
     @KubeLink(group = "core", version = "v1", kind = "toleration")
     @JsonInclude(JsonInclude.Include.NON_EMPTY)
-    @DeprecatedProperty(movedToPath = "spec.kafka.template.pod.tolerations")
+    @DeprecatedProperty(movedToPath = "spec.kafka.template.pod.tolerations", removalVersion = "v1beta2")
     @Deprecated
     public List<Toleration> getTolerations() {
         return tolerations;
